@@ -79,7 +79,8 @@ export default Cloudflare.Worker(
     main: import.meta.url,
     compatibility: { date: "2026-11-01" },
     assets: {
-      directory: "./public",
+      // Built from web/ by `npm run build:web`.
+      directory: "./dist",
       notFoundHandling: "single-page-application",
       runWorkerFirst: ["/api/*"],
     },

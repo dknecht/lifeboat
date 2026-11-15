@@ -6,16 +6,24 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "LIFEBOAT_LOCAL_STATE=1 alchemy dev",
+    "build:web": "vite build --config web/vite.config.ts",
+    "dev": "npm run build:web && LIFEBOAT_LOCAL_STATE=1 alchemy dev",
+    "dev:web": "vite --config web/vite.config.ts",
     "plan": "alchemy plan --stage prod",
-    "deploy": "alchemy deploy --stage prod",
+    "deploy": "npm run build:web && alchemy deploy --stage prod",
     "destroy": "alchemy destroy --stage prod",
     "lint": "oxlint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "test": "vitest run"
   },
   "dependencies": {
-    "postal-mime": "^4.2.1"
+    "@fontsource/big-shoulders-display": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@tanstack/react-query": "^5.107.1",
+    "lucide-react": "^1.73.0",
+    "postal-mime": "^4.2.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@alchemy.run/cloudflare": "^2.0.0-beta.87",
@@ -23,10 +31,16 @@
     "@cloudflare/workers-types": "^5.20261115.1",
     "@effect/platform-node": "^4.1.4",
     "@oxlint/plugins": "1.93.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
     "alchemy": "^2.0.0-beta.87",
     "effect": "^4.1.4",
     "oxlint": "1.93.0",
+    "tailwindcss": "^4.3.5",
     "typescript": "^7.0.2",
+    "vite": "^8.3.8",
     "vitest": "^5.1.0"
   }
 }

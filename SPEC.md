@@ -71,7 +71,7 @@ These were verified against Cloudflare and Microsoft documentation in November 2
 | Service | Use |
 |---|---|
 | Workers | Single Worker with `fetch`, `email`, and `scheduled` handlers, written in Effect. |
-| Workers Static Assets | The webmail and admin single-page app. No build step. |
+| Workers Static Assets | The webmail and admin single-page app, a React client built by Vite. |
 | Alchemy | Infrastructure as code. `src/worker.ts` declares the database, bucket, bindings, configuration, and cron trigger beside the code that uses them; `alchemy dev` runs the same stack locally. |
 | D1 | Users, addresses, sessions, message index, incidents, audit log, settings. |
 | R2 | Raw MIME (`raw/<id>.eml`), parsed bodies (`body/<id>.json`), attachments (`att/<id>/<n>`). |
@@ -261,7 +261,7 @@ lifeboat/
 │   ├── sync.ts         sync-back job and retention sweep
 │   ├── health.ts       probe
 │   └── settings.ts, http.ts, types.ts, util.ts
-├── public/             index.html, app.js, style.css
+├── web/                browser client (React, Tailwind, TanStack Query), built into dist/
 ├── site/index.html     landing page
 ├── tools/oxlint/       vendored anti-slop lint rules
 └── test/               Vitest suites running in the Workers runtime
