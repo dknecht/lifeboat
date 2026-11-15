@@ -1,11 +1,13 @@
 import { Suspense, lazy, useState } from "react";
 import { messageOf } from "./api/client";
-import { useFolder, useSession, useStatus } from "./api/queries";
-import type { Message, Session } from "./api/schemas";
+import { useDrafts, useFolder, useSession, useStatus } from "./api/queries";
+import type { Session } from "./api/schemas";
+import { draftSeed, newMessageSeed, replySeed, type ComposeSeed } from "./lib/compose-seed";
 import { AppShell } from "./components/AppShell";
 import { Notice, Spinner } from "./components/ui";
 import { parseRoute, useHash, type Route } from "./lib/router";
 import { AccessSignInPage, InvitePage, LoginPage } from "./pages/Auth";
+import { DraftsPage } from "./pages/Drafts";
 import { MailPage } from "./pages/Mail";
 
 // The admin console and the compose dialog are loaded when first opened, which keeps them out of
@@ -13,35 +15,36 @@ import { MailPage } from "./pages/Mail";
 const AdminPage = lazy(() => import("./pages/Admin").then((module) => ({ default: module.AdminPage })));
 const Compose = lazy(() => import("./components/Compose").then((module) => ({ default: module.Compose })));
 
-/** What the compose dialog is doing: closed, a new message, or a reply to `replyTo`. */
-type Composing = { readonly open: false } | { readonly open: true; readonly replyTo: Message | null };
-
 function SignedIn({ session, route }: { session: Session; route: Route }) {
-  const [composing, setComposing] = useState<Composing>({ open: false });
+  // What the compose dialog is writing, or null while it is closed.
+  const [composing, setComposing] = useState<ComposeSeed | null>(null);
   // The inbox query is shared with the list, so this adds no request; it feeds the unread badge.
   const inbox = useFolder("inbox");
+  const drafts = useDrafts();
   const unread = inbox.data?.pages[0]?.unread ?? 0;
   const showAdmin = route.name === "admin" && session.user.role === "admin";
 
   return (
-    <AppShell session={session} route={route} unread={unread} onCompose={() => setComposing({ open: true, replyTo: null })}>
+    <AppShell
+      session={session}
+      route={route}
+      unread={unread}
+      drafts={drafts.data?.length ?? 0}
+      onCompose={() => setComposing(newMessageSeed(session))}
+    >
       {showAdmin && (
         <Suspense fallback={<Spinner label="Loading the console" />}>
           <AdminPage authMode={session.authMode} />
         </Suspense>
       )}
       {route.name === "mail" && (
-        <MailPage folder={route.folder} messageId={route.messageId} onReply={(replyTo) => setComposing({ open: true, replyTo })} />
+        <MailPage folder={route.folder} messageId={route.messageId} onReply={(parent) => setComposing(replySeed(session, parent))} />
       )}
-      {composing.open && (
+      {route.name === "drafts" && <DraftsPage onOpen={(draft) => setComposing(draftSeed(draft))} />}
+      {composing && (
         <Suspense fallback={null}>
-          <Compose
-          // A new key per target gives each reply a fresh form.
-          key={composing.replyTo?.id ?? "new"}
-          session={session}
-          replyTo={composing.replyTo}
-          onClose={() => setComposing({ open: false })}
-          />
+          {/* A new key per message gives each one a fresh form. */}
+          <Compose key={composing.id} session={session} seed={composing} onClose={() => setComposing(null)} />
         </Suspense>
       )}
     </AppShell>

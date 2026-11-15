@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { getUserAddresses } from "./auth";
+import { deleteDraft } from "./drafts";
 import { ApiError, badRequest } from "./errors";
 import { Blobs, Db, Mailer, sql, type Statement } from "./services";
 import { getOpenIncidentId } from "./settings";
@@ -16,6 +17,8 @@ export const SendInput = Schema.Struct({
   subject: Schema.optional(Schema.String),
   text: Schema.optional(Schema.String),
   inReplyToId: Schema.optional(Schema.String),
+  /** The draft this message was written as, which is removed once the message is sent. */
+  draftId: Schema.optional(Schema.String),
   attachments: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -179,6 +182,8 @@ export const sendMessage = Effect.fn("sendMessage")(function* (user: UserRow, in
       id,
     ),
   ]);
+
+  if (input.draftId) yield* deleteDraft(user, input.draftId);
 
   return { id };
 });

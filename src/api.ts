@@ -34,6 +34,7 @@ import {
 } from "./errors";
 import { activate, deactivate, manualInstructions } from "./failover";
 import { getLastDirectoryImport, importDirectory } from "./directory";
+import { DraftInput, deleteDraft, listDrafts, saveDraft } from "./drafts";
 import { getProbeHealth } from "./health";
 import { SendInput, sendMessage } from "./outbound";
 import { AppConfig, Blobs, Db, Mailer, sql, type AppServices } from "./services";
@@ -525,6 +526,32 @@ const postMessage = (ctx: Ctx) =>
     return json(yield* sendMessage(user, input), 201);
   });
 
+// ── Draft routes ─────────────────────────────────────────────────────────────
+
+const getDrafts = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    const user = yield* requireUser(ctx);
+
+    return json({ drafts: yield* listDrafts(user) });
+  });
+
+const putDraft = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    const user = yield* requireUser(ctx);
+    const input = yield* body(ctx, DraftInput, "The draft could not be saved.");
+
+    return json(yield* saveDraft(user, ctx.params.id ?? "", input));
+  });
+
+const removeDraft = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    const user = yield* requireUser(ctx);
+
+    yield* deleteDraft(user, ctx.params.id ?? "");
+
+    return json({ ok: true });
+  });
+
 // ── Admin routes ─────────────────────────────────────────────────────────────
 
 const overview = (ctx: Ctx) =>
@@ -806,6 +833,9 @@ const routes = [
   route("GET", "/api/messages/:id", getMessage),
   route("GET", "/api/messages/:id/thread", getThread),
   route("GET", "/api/messages/:id/attachments/:idx", getAttachment),
+  route("GET", "/api/drafts", getDrafts),
+  route("PUT", "/api/drafts/:id", putDraft),
+  route("DELETE", "/api/drafts/:id", removeDraft),
   route("GET", "/api/admin/access-login", accessLogin),
   route("GET", "/api/admin/overview", overview),
   route("POST", "/api/admin/failover/activate", postActivate),

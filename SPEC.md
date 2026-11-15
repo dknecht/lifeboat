@@ -160,6 +160,7 @@ The email subscription is declared without a zone. Naming a zone would make Alch
 - Up to 50 recipients across To and Cc; up to 25 MiB including attachments.
 - Replies carry `In-Reply-To` and `References` so they thread in the recipient's client.
 - The message is stored in Sent with `sync_status = 'pending'` once Email Sending accepts it.
+- What is typed in the compose dialog is saved as a draft until it is sent or discarded. Drafts live only in Lifeboat and are not copied to Exchange.
 
 ### Authentication (v1)
 
@@ -234,6 +235,7 @@ All routes are under `/api`. Bodies are JSON.
 | `GET /messages/:id/thread` | The conversation the message belongs to; marks the message read. |
 | `GET /messages/:id/attachments/:idx` | Download an attachment. |
 | `POST /messages` | Send a message. |
+| `GET /drafts`, `PUT /drafts/:id`, `DELETE /drafts/:id` | List, save, and discard drafts. |
 | `GET /admin/overview` | State, probe health, counts, sync progress. |
 | `POST /admin/failover/activate`, `POST /admin/failover/deactivate` | Declare and end an incident. |
 | `GET /admin/users`, `POST /admin/users`, `POST /admin/users/:id/invite` | User management. |
@@ -297,7 +299,8 @@ lifeboat/
 | **Personal-address sign-in through Access** | Map a personal address to a work account so that Access's emailed one-time PIN can be used when the work mailbox is down. |
 | **Shared mailboxes and groups** | The scheduled directory import covers user mailboxes and their aliases. Shared mailboxes and distribution groups are not yet expanded to their members. |
 | **Calendar and contacts** | Read-only snapshot of calendars and the global address list, refreshed while healthy. |
-| **Drafts and full-text search** | Save unfinished messages. Search currently uses substring matching; D1 full-text indexing would rank results and scale further. |
+| **Full-text search** | Search uses substring matching; D1 full-text indexing would rank results and scale further. |
+| **Attachments on drafts** | A draft keeps its text and recipients. Files are chosen again when the message is sent. |
 | **Remote images** | Inline images are embedded. Images hosted elsewhere stay hidden; a privacy-preserving proxy would let people choose to load them. |
 | **MIME-faithful import** | Replace the JSON rebuild in sync-back when Microsoft offers a supported MIME import. |
 | **Per-user encryption at rest** | Envelope encryption of bodies with keys derived from user credentials. |

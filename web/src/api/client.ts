@@ -43,13 +43,19 @@ async function send<S extends Schema.ConstraintDecoder<unknown>>(path: string, s
 /** Reads from the API and decodes the response. */
 export const get = <S extends Schema.ConstraintDecoder<unknown>>(path: string, schema: S) => send(path, schema, { method: "GET" });
 
+const write =
+  (method: "POST" | "PUT" | "DELETE") =>
+  <S extends Schema.ConstraintDecoder<unknown>, Body extends object>(path: string, schema: S, body?: Body) =>
+    send(path, schema, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    });
+
 /** Writes to the API with a JSON body and decodes the response. */
-export const post = <S extends Schema.ConstraintDecoder<unknown>, Body extends object>(path: string, schema: S, body?: Body) =>
-  send(path, schema, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
+export const post = write("POST");
+export const put = write("PUT");
+export const del = write("DELETE");
 
 /** The message to show for anything a query or mutation threw. */
 export const messageOf = (error: Error | null) => error?.message ?? "";

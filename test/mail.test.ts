@@ -179,3 +179,57 @@ describe("search and conversations", () => {
     expect((await call(`/messages/${first}/thread`, { headers: { cookie: other.cookie } })).status).toBe(404);
   });
 });
+
+describe("drafts", () => {
+  const draft = { from: "nia@example.com", to: "client@other.test", cc: "", subject: "Half written", text: "Dear client," };
+
+  it("saves, updates, lists, and deletes a draft", async () => {
+    const { cookie } = await enrolledUser("nia@example.com");
+    const headers = { cookie };
+
+    expect((await call("/drafts/draft-0001", { method: "PUT", headers, body: draft })).status).toBe(200);
+    expect((await call("/drafts/draft-0001", { method: "PUT", headers, body: { ...draft, text: "Dear client, more." } })).status).toBe(200);
+
+    const listed = await json(await call("/drafts", { headers }));
+
+    expect(listed.drafts).toHaveLength(1);
+    expect(listed.drafts[0]).toMatchObject({ id: "draft-0001", to: "client@other.test", subject: "Half written", text: "Dear client, more." });
+
+    expect((await call("/drafts/draft-0001", { method: "DELETE", headers })).status).toBe(200);
+    expect((await json(await call("/drafts", { headers }))).drafts).toEqual([]);
+    expect((await call("/drafts/x", { method: "PUT", headers, body: draft })).status).toBe(400);
+    expect((await call("/drafts")).status).toBe(401);
+  });
+
+  it("keeps one user's drafts out of another's reach", async () => {
+    const owner = await enrolledUser("nia@example.com");
+    const other = await enrolledUser("oz@example.com");
+
+    await call("/drafts/draft-0002", { method: "PUT", headers: { cookie: owner.cookie }, body: draft });
+
+    // Another user cannot read, overwrite, or delete it, even knowing its ID.
+    expect((await json(await call("/drafts", { headers: { cookie: other.cookie } }))).drafts).toEqual([]);
+    expect((await call("/drafts/draft-0002", { method: "PUT", headers: { cookie: other.cookie }, body: { ...draft, text: "hijacked" } })).status).toBe(400);
+    await call("/drafts/draft-0002", { method: "DELETE", headers: { cookie: other.cookie } });
+
+    const mine = await json(await call("/drafts", { headers: { cookie: owner.cookie } }));
+
+    expect(mine.drafts[0].text).toBe("Dear client,");
+  });
+
+  it("removes the draft once its message is sent, and keeps it if sending fails", async () => {
+    const { cookie } = await enrolledUser("nia@example.com");
+    const headers = { cookie };
+    const message = { to: ["client@other.test"], subject: "Half written", text: "Dear client,", draftId: "draft-0003" };
+
+    await call("/drafts/draft-0003", { method: "PUT", headers, body: draft });
+
+    outbox.fail = true;
+    expect((await call("/messages", { method: "POST", headers, body: message })).status).toBe(502);
+    expect((await json(await call("/drafts", { headers }))).drafts).toHaveLength(1);
+
+    outbox.fail = false;
+    expect((await call("/messages", { method: "POST", headers, body: message })).status).toBe(201);
+    expect((await json(await call("/drafts", { headers }))).drafts).toEqual([]);
+  });
+});

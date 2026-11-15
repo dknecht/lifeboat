@@ -6,6 +6,7 @@ export type Route =
   | { readonly name: "login" }
   | { readonly name: "invite"; readonly token: string }
   | { readonly name: "mail"; readonly folder: Folder; readonly messageId: string | null }
+  | { readonly name: "drafts" }
   | { readonly name: "admin" };
 
 export function parseRoute(hash: string): Route {
@@ -16,6 +17,8 @@ export function parseRoute(hash: string): Route {
   if (first === "login") return { name: "login" };
 
   if (first === "admin") return { name: "admin" };
+
+  if (first === "drafts") return { name: "drafts" };
 
   return { name: "mail", folder: first === "sent" ? "sent" : "inbox", messageId: second || null };
 }

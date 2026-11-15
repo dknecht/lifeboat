@@ -98,6 +98,23 @@ export const MessageEnvelope = Schema.Struct({ message: Message });
 /** A conversation: every message that shares a thread, oldest first. */
 export const Thread = Schema.Struct({ messages: Schema.Array(Message) });
 
+/** A message someone has started writing and not sent. Recipients are kept as typed. */
+export const Draft = Schema.Struct({
+  id: Schema.String,
+  from: Schema.String,
+  to: Schema.String,
+  cc: Schema.String,
+  subject: Schema.String,
+  text: Schema.String,
+  inReplyToId: Schema.NullOr(Schema.String),
+  updatedAt: Schema.Number,
+});
+
+export type Draft = typeof Draft.Type;
+
+export const Drafts = Schema.Struct({ drafts: Schema.Array(Draft) });
+export const DraftSaved = Schema.Struct({ id: Schema.String });
+
 export const LoginResult = Schema.Struct({ user: User });
 export const InviteAccepted = Schema.Struct({ email: Schema.String });
 export const Sent = Schema.Struct({ id: Schema.String });

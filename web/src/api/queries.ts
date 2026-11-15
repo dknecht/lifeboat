@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiFailure, get, post } from "./client";
+import { ApiFailure, del, get, post, put } from "./client";
 import * as S from "./schemas";
 
 /** Public facts about this deployment, including how people are expected to sign in. */
@@ -98,13 +98,15 @@ export function useThread(id: string | null) {
   });
 }
 
-export interface Draft {
+/** A message ready to send. `draftId` names the saved draft to remove once it has gone. */
+export interface OutgoingMessage {
   from: string;
   to: string[];
   cc: string[];
   subject: string;
   text: string;
   inReplyToId?: string;
+  draftId?: string;
   attachments: { filename: string; contentType: string; contentBase64: string }[];
 }
 
@@ -112,12 +114,47 @@ export function useSendMessage() {
   const client = useQueryClient();
 
   return useMutation({
-    mutationFn: (draft: Draft) => post("/messages", S.Sent, draft),
+    mutationFn: (message: OutgoingMessage) => post("/messages", S.Sent, message),
     onSuccess: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: ["messages"] }),
         client.invalidateQueries({ queryKey: ["thread"] }),
+        client.invalidateQueries({ queryKey: ["drafts"] }),
       ]),
+  });
+}
+
+// ── Drafts ───────────────────────────────────────────────────────────────────
+
+export const useDrafts = () =>
+  useQuery({ queryKey: ["drafts"], queryFn: async () => (await get("/drafts", S.Drafts)).drafts });
+
+/** What a draft holds, without the fields the server assigns. */
+export interface DraftContent {
+  id: string;
+  from: string;
+  to: string;
+  cc: string;
+  subject: string;
+  text: string;
+  inReplyToId: string | null;
+}
+
+export function useSaveDraft() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, ...content }: DraftContent) => put(`/drafts/${id}`, S.DraftSaved, content),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["drafts"] }),
+  });
+}
+
+export function useDeleteDraft() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => del(`/drafts/${id}`, S.Done),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["drafts"] }),
   });
 }
 

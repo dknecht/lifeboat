@@ -1,6 +1,6 @@
 import { Button } from "@cloudflare/kumo/components/button";
 import { Tooltip } from "@cloudflare/kumo/components/tooltip";
-import { PaperPlaneTiltIcon, PencilSimpleLineIcon, ShieldCheckIcon, SignOutIcon, TrayIcon } from "@phosphor-icons/react";
+import { NotePencilIcon, PaperPlaneTiltIcon, PencilSimpleLineIcon, ShieldCheckIcon, SignOutIcon, TrayIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { ACCESS_LOGOUT_HREF, useLogout } from "../api/queries";
 import type { Session } from "../api/schemas";
@@ -42,12 +42,13 @@ interface AppShellProps {
   session: Session;
   route: Route;
   unread: number;
+  drafts: number;
   onCompose: () => void;
   children: ReactNode;
 }
 
 /** The frame around every signed-in view: the hull-coloured navigation, the outage banner, and the account controls. */
-export function AppShell({ session, route, unread, onCompose, children }: AppShellProps) {
+export function AppShell({ session, route, unread, drafts, onCompose, children }: AppShellProps) {
   const logout = useLogout();
   const banner = BANNER[session.state];
   const folder = route.name === "mail" ? route.folder : null;
@@ -87,9 +88,10 @@ export function AppShell({ session, route, unread, onCompose, children }: AppShe
           <Button variant="primary" icon={<PencilSimpleLineIcon />} onClick={onCompose} className="w-full justify-center md:mt-2">
             New message
           </Button>
-          <nav aria-label="Mailbox" className="flex gap-1 md:flex-col">
+          <nav aria-label="Mailbox" className="flex flex-wrap gap-1 md:flex-col">
             <NavItem route={{ name: "mail", folder: "inbox", messageId: null }} current={folder === "inbox"} icon={<TrayIcon size={18} aria-hidden="true" />} label="Inbox" count={unread} />
             <NavItem route={{ name: "mail", folder: "sent", messageId: null }} current={folder === "sent"} icon={<PaperPlaneTiltIcon size={18} aria-hidden="true" />} label="Sent" />
+            <NavItem route={{ name: "drafts" }} current={route.name === "drafts"} icon={<NotePencilIcon size={18} aria-hidden="true" />} label="Drafts" count={drafts} />
             {session.user.role === "admin" && (
               <NavItem route={{ name: "admin" }} current={route.name === "admin"} icon={<ShieldCheckIcon size={18} aria-hidden="true" />} label="Admin" />
             )}

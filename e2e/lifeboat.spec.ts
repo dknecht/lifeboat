@@ -179,6 +179,26 @@ test("search finds a message by words in its body", async () => {
   await page.getByLabel("Search Inbox").fill("");
 });
 
+test("a half-written message is kept as a draft and can be finished later", async () => {
+  await page.getByRole("button", { name: "New message" }).click();
+  await page.getByLabel("To", { exact: true }).fill("li.wei@partner.test");
+  await page.getByLabel("Subject").fill("Agenda for Monday");
+  await page.getByLabel("Message", { exact: true }).fill("First item: budget.");
+  await expect(page.getByText("Draft saved")).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("link", { name: /Drafts/ }).click();
+  await expect(page.getByRole("link", { name: /Drafts/ })).toContainText("1");
+  await page.getByRole("button", { name: /Agenda for Monday/ }).first().click();
+  await expect(page.getByLabel("To", { exact: true })).toHaveValue("li.wei@partner.test");
+  await expect(page.getByLabel("Message", { exact: true })).toHaveValue("First item: budget.");
+
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Message sent").last()).toBeVisible();
+  await page.getByRole("link", { name: /Drafts/ }).click();
+  await expect(page.getByText("Nothing in the logbook")).toBeVisible();
+});
+
 test("held mail can be assigned to a user from the admin console", async () => {
   await page.getByRole("link", { name: "Admin" }).click();
 
