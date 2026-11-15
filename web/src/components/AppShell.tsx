@@ -1,6 +1,6 @@
 import { Button } from "@cloudflare/kumo/components/button";
 import { Tooltip } from "@cloudflare/kumo/components/tooltip";
-import { NotePencilIcon, PaperPlaneTiltIcon, PencilSimpleLineIcon, ShieldCheckIcon, SignOutIcon, TrayIcon } from "@phosphor-icons/react";
+import { KeyIcon, NotePencilIcon, PaperPlaneTiltIcon, PencilSimpleLineIcon, ShieldCheckIcon, SignOutIcon, TrayIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { ACCESS_LOGOUT_HREF, useLogout } from "../api/queries";
 import type { Session } from "../api/schemas";
@@ -92,6 +92,9 @@ export function AppShell({ session, route, unread, drafts, onCompose, children }
             <NavItem route={{ name: "mail", folder: "inbox", messageId: null }} current={folder === "inbox"} icon={<TrayIcon size={18} aria-hidden="true" />} label="Inbox" count={unread} />
             <NavItem route={{ name: "mail", folder: "sent", messageId: null }} current={folder === "sent"} icon={<PaperPlaneTiltIcon size={18} aria-hidden="true" />} label="Sent" />
             <NavItem route={{ name: "drafts" }} current={route.name === "drafts"} icon={<NotePencilIcon size={18} aria-hidden="true" />} label="Drafts" count={drafts} />
+            {session.via === "session" && (
+              <NavItem route={{ name: "account" }} current={route.name === "account"} icon={<KeyIcon size={18} aria-hidden="true" />} label="Account" />
+            )}
             {session.user.role === "admin" && (
               <NavItem route={{ name: "admin" }} current={route.name === "admin"} icon={<ShieldCheckIcon size={18} aria-hidden="true" />} label="Admin" />
             )}

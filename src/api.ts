@@ -31,11 +31,22 @@ import {
   type FailoverError,
   type GraphError,
   type GraphNotConfigured,
+  type PasskeyRejected,
 } from "./errors";
 import { activate, deactivate, manualInstructions } from "./failover";
 import { getLastDirectoryImport, importDirectory } from "./directory";
 import { DraftInput, deleteDraft, listDrafts, saveDraft } from "./drafts";
 import { getProbeHealth } from "./health";
+import {
+  AuthenticationResponse,
+  RegistrationResponse,
+  beginLogin,
+  beginRegistration,
+  deletePasskey,
+  finishLogin,
+  finishRegistration,
+  listPasskeys,
+} from "./passkeys";
 import { SendInput, sendMessage } from "./outbound";
 import { AppConfig, Blobs, Db, Mailer, sql, type AppServices } from "./services";
 import { audit, getState } from "./settings";
@@ -309,6 +320,78 @@ const accessLogin = (ctx: Ctx) =>
     const next = ctx.url.searchParams.get("next") === "inbox" ? "inbox" : "admin";
 
     return new Response(null, { status: 302, headers: { location: AFTER_ACCESS[next], "cache-control": "no-store" } });
+  });
+
+// ── Passkey routes ───────────────────────────────────────────────────────────
+
+/** Passkeys are a Lifeboat credential, so managing them needs a Lifeboat session. */
+const requireSessionUser = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    yield* requireLocalSignIn;
+
+    return yield* requireUser(ctx);
+  });
+
+const getPasskeys = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    const user = yield* requireSessionUser(ctx);
+
+    return json({ passkeys: yield* listPasskeys(user) });
+  });
+
+const postPasskeyRegisterOptions = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    const user = yield* requireSessionUser(ctx);
+
+    return json(yield* beginRegistration(user));
+  });
+
+const PasskeyRegistration = Schema.Struct({
+  challengeId: Schema.String,
+  name: Schema.optional(Schema.String),
+  response: RegistrationResponse,
+});
+
+const postPasskeyRegister = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    const user = yield* requireSessionUser(ctx);
+    const input = yield* body(ctx, PasskeyRegistration, "The passkey could not be read.");
+    const created = yield* finishRegistration(user, input.challengeId, input.name ?? "", input.response);
+
+    yield* audit(user.email, "passkey.add");
+
+    return json(created, 201);
+  });
+
+const removePasskey = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    const user = yield* requireSessionUser(ctx);
+
+    yield* deletePasskey(user, ctx.params.id ?? "");
+    yield* audit(user.email, "passkey.remove");
+
+    return json({ ok: true });
+  });
+
+const postPasskeyLoginOptions = () =>
+  Effect.gen(function* () {
+    yield* requireLocalSignIn;
+
+    return json(yield* beginLogin);
+  });
+
+const PasskeyLogin = Schema.Struct({ challengeId: Schema.String, response: AuthenticationResponse });
+
+const postPasskeyLogin = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    yield* requireLocalSignIn;
+
+    const input = yield* body(ctx, PasskeyLogin, "The passkey could not be read.");
+    const result = yield* finishLogin(input.challengeId, input.response);
+
+    return json({ user: publicUser(result.user) }, 200, {
+      "set-cookie": sessionCookie(result.token, isSecure(ctx)),
+    });
   });
 
 // ── Mail routes ──────────────────────────────────────────────────────────────
@@ -814,7 +897,7 @@ const listAudit = (ctx: Ctx) =>
 
 type Handler = (ctx: Ctx) => Effect.Effect<Response, RouteError, AppServices>;
 
-type RouteError = ApiError | DbError | BlobError | FailoverError | GraphError | GraphNotConfigured;
+type RouteError = ApiError | DbError | BlobError | FailoverError | GraphError | GraphNotConfigured | PasskeyRejected;
 
 const route = (method: string, path: string, handler: Handler) => ({
   method,
@@ -828,6 +911,12 @@ const routes = [
   route("POST", "/api/auth/accept-invite", postAcceptInvite),
   route("POST", "/api/auth/logout", postLogout),
   route("GET", "/api/auth/me", getMe),
+  route("POST", "/api/auth/passkeys/login-options", postPasskeyLoginOptions),
+  route("POST", "/api/auth/passkeys/login", postPasskeyLogin),
+  route("GET", "/api/auth/passkeys", getPasskeys),
+  route("POST", "/api/auth/passkeys/register-options", postPasskeyRegisterOptions),
+  route("POST", "/api/auth/passkeys/register", postPasskeyRegister),
+  route("DELETE", "/api/auth/passkeys/:id", removePasskey),
   route("GET", "/api/messages", listMessages),
   route("POST", "/api/messages", postMessage),
   route("GET", "/api/messages/:id", getMessage),
@@ -883,6 +972,7 @@ export const handleApi = (request: Request): Effect.Effect<Response, never, AppS
     Effect.catchTags({
       ApiError: (e) => Effect.succeed(json(e.code ? { error: e.message, code: e.code } : { error: e.message }, e.status)),
       FailoverError: (e) => Effect.succeed(json({ error: e.message }, 409)),
+      PasskeyRejected: (e) => Effect.succeed(json({ error: e.message }, 400)),
       GraphNotConfigured: (e) => Effect.succeed(json({ error: e.message }, 400)),
       GraphError: (e) => Effect.succeed(json({ error: e.message }, 502)),
       DbError: (e) => serverError(Effect.logError("Database error", e.cause)),

@@ -115,6 +115,24 @@ export type Draft = typeof Draft.Type;
 export const Drafts = Schema.Struct({ drafts: Schema.Array(Draft) });
 export const DraftSaved = Schema.Struct({ id: Schema.String });
 
+export const Passkey = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  createdAt: Schema.Number,
+  lastUsedAt: Schema.NullOr(Schema.Number),
+});
+
+export type Passkey = typeof Passkey.Type;
+
+export const Passkeys = Schema.Struct({ passkeys: Schema.Array(Passkey) });
+
+/**
+ * A passkey challenge from the server. `options` is handed to the browser's WebAuthn API as it is;
+ * the browser validates it, so Lifeboat does not describe its contents a second time here.
+ */
+export const PasskeyChallenge = Schema.Struct({ challengeId: Schema.String, options: Schema.Any });
+export const PasskeyAdded = Schema.Struct({ id: Schema.String });
+
 export const LoginResult = Schema.Struct({ user: User });
 export const InviteAccepted = Schema.Struct({ email: Schema.String });
 export const Sent = Schema.Struct({ id: Schema.String });

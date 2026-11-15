@@ -58,4 +58,11 @@ export const put = write("PUT");
 export const del = write("DELETE");
 
 /** The message to show for anything a query or mutation threw. */
-export const messageOf = (error: Error | null) => error?.message ?? "";
+export function messageOf(error: Error | null): string {
+  if (!error) return "";
+
+  // The browser reports a dismissed or timed-out passkey prompt this way; its own wording is not for people.
+  if (error.name === "NotAllowedError") return "The passkey prompt was cancelled or timed out.";
+
+  return error.message;
+}

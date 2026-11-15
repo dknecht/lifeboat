@@ -163,6 +163,25 @@ export const acceptInvite = Effect.fn("acceptInvite")(function* (token: string, 
   return user;
 });
 
+/** Starts a session for a user who has just proved who they are, and returns its token. */
+export const startSession = Effect.fn("startSession")(function* (userId: string) {
+  const db = yield* Db;
+  const token = randomToken();
+
+  yield* db.batch([
+    sql("UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?", userId),
+    sql(
+      "INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+      yield* hashToken(token),
+      userId,
+      now() + SESSION_TTL_MS,
+      now(),
+    ),
+  ]);
+
+  return token;
+});
+
 /** Creates a session for the user, failing with LoginRejected when the credentials are refused. */
 export const login = Effect.fn("login")(function* (email: string, password: string) {
   const db = yield* Db;
@@ -193,20 +212,7 @@ export const login = Effect.fn("login")(function* (email: string, password: stri
     return yield* new LoginRejected({ reason: lock ? "locked" : "invalid" });
   }
 
-  const token = randomToken();
-
-  yield* db.batch([
-    sql("UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?", user.id),
-    sql(
-      "INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
-      yield* hashToken(token),
-      user.id,
-      now() + SESSION_TTL_MS,
-      now(),
-    ),
-  ]);
-
-  return { user, token };
+  return { user, token: yield* startSession(user.id) };
 });
 
 export const getSessionUser = Effect.fn("getSessionUser")(function* (token: string) {

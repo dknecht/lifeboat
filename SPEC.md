@@ -172,6 +172,10 @@ Entra ID cannot be relied on during a Microsoft outage, so v1 uses **local accou
 
 Details: PBKDF2-SHA-256 with 100,000 iterations and a per-user salt; opaque session tokens stored hashed; `HttpOnly`, `Secure`, `SameSite=Strict` cookies; five failed logins lock the account for 15 minutes; state-changing requests require a JSON content type.
 
+### Passkeys
+
+A user with a local account can register WebAuthn passkeys and sign in with one in place of the password. Credentials are discoverable, so sign-in does not ask for an address. Each ceremony uses a single-use challenge that expires after five minutes, and the relying party is the hostname in `APP_URL`. Verification uses `@simplewebauthn/server`.
+
 ### Authentication through Cloudflare Access
 
 `AUTH_MODE` adds two alternatives to local accounts:
@@ -230,6 +234,8 @@ All routes are under `/api`. Bodies are JSON.
 | `GET /status` | Failover state and whether an incident is open. Public. |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session management. |
 | `POST /auth/accept-invite` | Set a password from an invite token. |
+| `POST /auth/passkeys/login-options`, `POST /auth/passkeys/login` | Sign in with a passkey. |
+| `GET /auth/passkeys`, `POST /auth/passkeys/register-options`, `POST /auth/passkeys/register`, `DELETE /auth/passkeys/:id` | Manage the signed-in user's passkeys. |
 | `GET /messages?folder=&q=&cursor=` | List a folder, optionally narrowed by search words. |
 | `GET /messages/:id` | Message with body and attachment list; marks it read. |
 | `GET /messages/:id/thread` | The conversation the message belongs to; marks the message read. |
@@ -272,6 +278,9 @@ lifeboat/
 │   ├── api.ts          HTTP router and handlers
 │   ├── auth.ts         password hashing, sessions, invites
 │   ├── access.ts       Cloudflare Access token verification
+│   ├── passkeys.ts     WebAuthn registration and sign-in
+│   ├── drafts.ts       unsent messages
+│   ├── directory.ts    scheduled import of users from Microsoft 365
 │   ├── inbound.ts      receive, parse, store
 │   ├── outbound.ts     send through Email Sending
 │   ├── failover.ts     state machine and Cloudflare DNS control
@@ -295,7 +304,7 @@ lifeboat/
 | **Declarative MX switch** | Model the Microsoft MX record, Email Routing, and the catch-all rule as Alchemy resources, so that an outage can be declared with a deploy as well as from the admin console. Needs care over the order in which records are removed and routing is enabled. |
 | **Always-inline mode** | MX on Cloudflare permanently. Every message is stored in a rolling window and forwarded to Microsoft 365, so users have recent history the moment an outage starts and no MX flip is needed. Requires a forwarding path that preserves sender authentication (a Microsoft inbound connector). |
 | **Journaling mode** | MX stays on Microsoft; a journal rule copies mail to a Lifeboat address for history. Combined with the MX flip for new mail. |
-| **Passkeys** | WebAuthn enrollment as a stronger local credential than a password. |
+| **Passkey-only accounts** | A passkey can be added beside a password. Enrolling with a passkey alone, with no password ever set, is not offered yet. |
 | **Personal-address sign-in through Access** | Map a personal address to a work account so that Access's emailed one-time PIN can be used when the work mailbox is down. |
 | **Shared mailboxes and groups** | The scheduled directory import covers user mailboxes and their aliases. Shared mailboxes and distribution groups are not yet expanded to their members. |
 | **Calendar and contacts** | Read-only snapshot of calendars and the global address list, refreshed while healthy. |

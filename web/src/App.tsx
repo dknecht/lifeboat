@@ -13,6 +13,7 @@ import { MailPage } from "./pages/Mail";
 // The admin console and the compose dialog are loaded when first opened, which keeps them out of
 // the code everyone downloads just to read mail.
 const AdminPage = lazy(() => import("./pages/Admin").then((module) => ({ default: module.AdminPage })));
+const AccountPage = lazy(() => import("./pages/Account").then((module) => ({ default: module.AccountPage })));
 const Compose = lazy(() => import("./components/Compose").then((module) => ({ default: module.Compose })));
 
 function SignedIn({ session, route }: { session: Session; route: Route }) {
@@ -39,6 +40,11 @@ function SignedIn({ session, route }: { session: Session; route: Route }) {
       )}
       {route.name === "mail" && (
         <MailPage folder={route.folder} messageId={route.messageId} onReply={(parent) => setComposing(replySeed(session, parent))} />
+      )}
+      {route.name === "account" && (
+        <Suspense fallback={<Spinner label="Loading your account" />}>
+          <AccountPage session={session} />
+        </Suspense>
       )}
       {route.name === "drafts" && <DraftsPage onOpen={(draft) => setComposing(draftSeed(draft))} />}
       {composing && (

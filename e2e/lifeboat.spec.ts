@@ -52,7 +52,7 @@ async function ensureStandby(request: APIRequestContext) {
 async function signIn(page: Page) {
   await page.getByLabel("Work email address").fill(user);
   await page.getByLabel("Lifeboat password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
 }
 
 test.describe.configure({ mode: "serial" });
@@ -87,7 +87,7 @@ test("a new user sets a password from an invite and signs in", async ({ request 
 
   await page.getByLabel("Work email address").fill(user);
   await page.getByLabel("Lifeboat password").fill("the wrong password");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText("The email address or password is incorrect.");
 
   await signIn(page);
@@ -232,4 +232,37 @@ test("ending the outage returns the service to recovery", async () => {
   await page.getByRole("button", { name: "End outage and sync mail back" }).click();
   await expect(page.getByText("Recovering").first()).toBeVisible();
   await expect(page.getByText("Microsoft 365 is back.")).toBeVisible();
+});
+
+test("a passkey can be added and then used to sign in without a password", async () => {
+  // Chromium can stand in for a fingerprint reader, so the real WebAuthn ceremony runs.
+  const devtools = await page.context().newCDPSession(page);
+
+  await devtools.send("WebAuthn.enable");
+  await devtools.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+
+  await page.getByRole("link", { name: "Account" }).click();
+  await expect(page.getByText("You have no passkeys yet.")).toBeVisible();
+  await page.getByLabel("Name for this device").fill("Work laptop");
+  await page.getByRole("button", { name: "Add a passkey" }).click();
+  await expect(page.getByText("Work laptop")).toBeVisible();
+  await expect(page.getByText("not used yet")).toBeVisible();
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+  await expect(page.getByRole("link", { name: /Inbox/ })).toBeVisible();
+
+  await page.getByRole("link", { name: "Account" }).click();
+  await expect(page.getByText(/last used/)).toBeVisible();
+  await page.getByRole("button", { name: /Remove the passkey/ }).click();
+  await expect(page.getByText("You have no passkeys yet.")).toBeVisible();
 });

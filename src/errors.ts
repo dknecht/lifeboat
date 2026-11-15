@@ -39,6 +39,9 @@ export class LoginRejected extends Data.TaggedError("LoginRejected")<{
 /** A Cloudflare Access token was missing something or failed verification. `reason` is for logs. */
 export class AccessRejected extends Data.TaggedError("AccessRejected")<{ readonly reason: string }> {}
 
+/** A passkey ceremony failed: the challenge expired, the response did not verify, or the passkey is unknown. */
+export class PasskeyRejected extends Data.TaggedError("PasskeyRejected")<{ readonly message: string }> {}
+
 /** A failover transition was refused or a DNS change failed. */
 export class FailoverError extends Data.TaggedError("FailoverError")<{ readonly message: string }> {}
 

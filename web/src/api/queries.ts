@@ -1,3 +1,4 @@
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiFailure, del, get, post, put } from "./client";
 import * as S from "./schemas";
@@ -55,6 +56,50 @@ export const useAcceptInvite = () =>
     mutationFn: (input: { token: string; password: string }) =>
       post("/auth/accept-invite", S.InviteAccepted, input),
   });
+
+// ── Passkeys ─────────────────────────────────────────────────────────────────
+
+/** Signs in with a passkey: the server issues a challenge, the device signs it, the server checks it. */
+export function usePasskeyLogin() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const challenge = await post("/auth/passkeys/login-options", S.PasskeyChallenge);
+      const response = await startAuthentication({ optionsJSON: challenge.options });
+
+      return post("/auth/passkeys/login", S.LoginResult, { challengeId: challenge.challengeId, response });
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: ["session"] }),
+  });
+}
+
+export const usePasskeys = () =>
+  useQuery({ queryKey: ["passkeys"], queryFn: async () => (await get("/auth/passkeys", S.Passkeys)).passkeys });
+
+/** Creates a passkey on this device and registers it under `name`. */
+export function useAddPasskey() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (name: string) => {
+      const challenge = await post("/auth/passkeys/register-options", S.PasskeyChallenge);
+      const response = await startRegistration({ optionsJSON: challenge.options });
+
+      return post("/auth/passkeys/register", S.PasskeyAdded, { challengeId: challenge.challengeId, name, response });
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: ["passkeys"] }),
+  });
+}
+
+export function useDeletePasskey() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => del(`/auth/passkeys/${encodeURIComponent(id)}`, S.Done),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["passkeys"] }),
+  });
+}
 
 /**
  * A folder's messages, newest first, refreshed every 30 seconds so new mail shows up unprompted.

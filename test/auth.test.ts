@@ -66,3 +66,48 @@ describe("accounts", () => {
     expect(res.status).toBe(415);
   });
 });
+
+describe("passkeys", () => {
+  const bogus = {
+    id: "bm90LWEtcmVhbC1jcmVkZW50aWFs",
+    rawId: "bm90LWEtcmVhbC1jcmVkZW50aWFs",
+    type: "public-key",
+    clientExtensionResults: {},
+    response: { clientDataJSON: "e30", authenticatorData: "AA", signature: "AA" },
+  };
+
+  it("issues sign-in and registration challenges bound to the address Lifeboat is served from", async () => {
+    const { cookie } = await enrolledUser("pat@example.com");
+    const login = await json(await call("/auth/passkeys/login-options", { method: "POST" }));
+
+    expect(login.options.rpId).toBe("lifeboat.test");
+    expect(login.options.challenge.length).toBeGreaterThan(20);
+
+    const register = await json(await call("/auth/passkeys/register-options", { method: "POST", headers: { cookie } }));
+
+    expect(register.options).toMatchObject({ rp: { id: "lifeboat.test", name: "Lifeboat" }, user: { name: "pat@example.com" } });
+    expect(register.options.authenticatorSelection.residentKey).toBe("required");
+    expect((await json(await call("/auth/passkeys", { headers: { cookie } }))).passkeys).toEqual([]);
+  });
+
+  it("refuses an unknown passkey, a reused challenge, and anyone who is not signed in", async () => {
+    const { challengeId } = await json(await call("/auth/passkeys/login-options", { method: "POST" }));
+    const first = await call("/auth/passkeys/login", { method: "POST", body: { challengeId, response: bogus } });
+
+    expect(first.status).toBe(400);
+    expect((await json(first)).error).toBe("That passkey is not registered with Lifeboat.");
+
+    // The challenge was spent by the first attempt.
+    const second = await call("/auth/passkeys/login", { method: "POST", body: { challengeId, response: bogus } });
+
+    expect((await json(second)).error).toBe("That took too long. Start again.");
+    expect((await call("/auth/passkeys/register-options", { method: "POST" })).status).toBe(401);
+    expect((await call("/auth/passkeys", {})).status).toBe(401);
+  });
+
+  it("is switched off when Cloudflare Access is the only way to sign in", async () => {
+    const vars = { AUTH_MODE: "access", ACCESS_TEAM_DOMAIN: "t.cloudflareaccess.com", ACCESS_AUD: "aud" };
+
+    expect((await call("/auth/passkeys/login-options", { method: "POST", vars })).status).toBe(409);
+  });
+});

@@ -59,7 +59,7 @@ curl 'http://localhost:1337/cdn-cgi/handler/scheduled?cron=*/5%20*%20*%20*%20*'
 
 Run the checks with `npm test`, `npm run typecheck`, and `npm run lint`.
 
-`npm run test:e2e` drives the web client in a real browser against a locally started stack: enrolment, declaring an outage, receiving and reading mail, replying, search, held mail, and the phone layout. It needs Playwright's Chromium (`npx playwright install chromium`) and port 1337 free, and keeps its data in a separate `e2e` stage.
+`npm run test:e2e` drives the web client in a real browser against a locally started stack: enrolment, declaring an outage, receiving and reading mail, replying, search, drafts, held mail, the phone layout, and passkeys. It needs Playwright's Chromium (`npx playwright install chromium`) and port 1337 free, and keeps its data in a separate `e2e` stage.
 
 Linting uses [anti-slop](https://github.com/dmmulroy/anti-slop), a set of Oxlint rules vendored under `tools/oxlint/anti-slop/`, with every generic and Effect rule enabled as an error. The rules are yours to edit; `tools/oxlint/anti-slop/UPSTREAM.md` records where they came from.
 
@@ -86,6 +86,14 @@ Do all of this while Microsoft 365 is healthy.
 8. **Run a drill.** Declare an outage on a test domain, follow the DNS steps the Admin page shows, send mail in, reply, end the outage, and confirm the messages appear in Outlook.
 
 Alchemy keeps deployment state in your Cloudflare account, so any machine or CI job with credentials can update the stack. `npm run destroy` removes everything, including stored mail.
+
+## Passkeys
+
+Anyone who signs in with a Lifeboat password can add passkeys on the Account page and then sign in with a fingerprint, face, or device PIN. A passkey needs nothing from Microsoft and cannot be phished from another site.
+
+- Passkeys are bound to the hostname in `APP_URL`. Set it to the address people really use; changing it later invalidates existing passkeys.
+- The password stays as a fallback. Passkeys are not offered when `AUTH_MODE` is `access`.
+- Encourage people to add a passkey on each device they would use in an outage, while everything is healthy.
 
 ## Sign-in with Cloudflare Access
 
@@ -158,6 +166,8 @@ Verified locally (automated tests in the Workers runtime, plus a browser run aga
 
 - Inbound capture, aliases, held mail, attachment storage and download, per-user isolation.
 - Enrollment, sign-in, lockout, sessions, admin authorization.
+- Passkeys: a full registration and sign-in in Chromium with a virtual authenticator, verified by the Worker.
+- Drafts, the scheduled directory import, and inline images.
 - Cloudflare Access token verification (signature, audience, issuer, expiry), automatic account creation, and the three sign-in modes.
 - Sending with threading headers through the local Email Sending binding.
 - `npm run dev` through Alchemy's Effect runtime: migrations, bindings, secrets, static assets, inbound mail, sending, and the cron handler.

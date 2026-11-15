@@ -3,8 +3,9 @@ import { Input } from "@cloudflare/kumo/components/input";
 import { Surface } from "@cloudflare/kumo/components/surface";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { messageOf } from "../api/client";
-import { ShieldCheckIcon } from "@phosphor-icons/react";
-import { accessLoginHref, useAcceptInvite, useLogin } from "../api/queries";
+import { FingerprintIcon, ShieldCheckIcon } from "@phosphor-icons/react";
+import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
+import { accessLoginHref, useAcceptInvite, useLogin, usePasskeyLogin } from "../api/queries";
 import type { AuthMode } from "../api/schemas";
 import { Brand, Notice, Stencil } from "../components/ui";
 import { hrefFor, navigate, useTitle } from "../lib/router";
@@ -47,6 +48,8 @@ export function AccessSignInPage() {
 
 export function LoginPage({ authMode }: { authMode: AuthMode }) {
   const login = useLogin();
+  const passkey = usePasskeyLogin();
+  const toInbox = () => navigate({ name: "mail", folder: "inbox", messageId: null });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -59,11 +62,17 @@ export function LoginPage({ authMode }: { authMode: AuthMode }) {
     <AuthCard title="All hands, sign in" lead="Use the password you set for Lifeboat, not your Microsoft password.">
       <form onSubmit={submit} className="grid gap-4">
         {login.isError && <Notice kind="error">{messageOf(login.error)}</Notice>}
+        {passkey.isError && <Notice kind="error">{messageOf(passkey.error)}</Notice>}
         <Input id="email" label="Work email address" type="email" autoComplete="username" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} />
         <Input id="password" label="Lifeboat password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
         <Button type="submit" variant="primary" loading={login.isPending}>
           Sign in
         </Button>
+        {browserSupportsWebAuthn() && (
+          <Button icon={<FingerprintIcon />} loading={passkey.isPending} onClick={() => passkey.mutate(undefined, { onSuccess: toInbox })}>
+            Sign in with a passkey
+          </Button>
+        )}
       </form>
       {authMode === "both" && (
         <p className="mt-5 border-t border-kumo-line pt-4 text-sm text-kumo-subtle">
