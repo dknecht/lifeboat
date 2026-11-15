@@ -59,6 +59,8 @@ curl 'http://localhost:1337/cdn-cgi/handler/scheduled?cron=*/5%20*%20*%20*%20*'
 
 Run the checks with `npm test`, `npm run typecheck`, and `npm run lint`.
 
+`npm run test:e2e` drives the web client in a real browser against a locally started stack: enrolment, declaring an outage, receiving and reading mail, replying, search, held mail, and the phone layout. It needs Playwright's Chromium (`npx playwright install chromium`) and port 1337 free, and keeps its data in a separate `e2e` stage.
+
 Linting uses [anti-slop](https://github.com/dmmulroy/anti-slop), a set of Oxlint rules vendored under `tools/oxlint/anti-slop/`, with every generic and Effect rule enabled as an error. The rules are yours to edit; `tools/oxlint/anti-slop/UPSTREAM.md` records where they came from.
 
 The project's landing page is a single static file, [`site/index.html`](site/index.html). Open it in a browser or host it anywhere.
@@ -161,7 +163,7 @@ Verified locally (automated tests in the Workers runtime, plus a browser run aga
 - The failover state machine, health probe counters, retention sweep.
 - Sync-back request construction against a stubbed Microsoft Graph.
 - HTML mail is rendered with scripts and remote content blocked.
-- The React client, driven through sign-in, declaring an outage, reading, replying, filtering, and the admin console, at desktop and phone widths.
+- The React client, through the end-to-end suite: enrolment, sign-in, declaring and ending an outage, reading HTML mail, replying, conversations, search, assigning held mail, and the phone layout.
 
 Not yet verified against live services:
 

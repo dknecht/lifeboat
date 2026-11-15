@@ -6,7 +6,7 @@ import { Blobs, Db, Mailer, sql, type Statement } from "./services";
 import { getOpenIncidentId } from "./settings";
 import type { MessageRow, OutgoingEmail, Person, StoredBody, UserRow } from "./types";
 import { MAX_MESSAGE_BYTES, MAX_RECIPIENTS } from "./types";
-import { escapeHtml, fromBase64, isValidAddress, snippetOf, newId, normalizeAddress, now } from "./util";
+import { escapeHtml, fromBase64, isValidAddress, newId, normalizeAddress, now, searchTextOf, snippetOf } from "./util";
 
 /** The body of `POST /api/messages`. */
 export const SendInput = Schema.Struct({
@@ -173,6 +173,11 @@ export const sendMessage = Effect.fn("sendMessage")(function* (user: UserRow, in
       attachments.length ? 1 : 0,
     ),
     ...attachmentRows,
+    sql(
+      "UPDATE messages SET search_text = ? WHERE id = ?",
+      searchTextOf([subject, user.display_name, from, ...to, ...cc, text]),
+      id,
+    ),
   ]);
 
   return { id };

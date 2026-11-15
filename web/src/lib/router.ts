@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { Folder } from "../api/schemas";
 
 /** Where the interface is. Routes live in the URL hash so that invite links work on any host. */
@@ -53,4 +53,17 @@ export function useTitle(title: string) {
       document.title = previous;
     };
   }, [title]);
+}
+
+/** Returns `value` once it has stopped changing for `delayMs`, so that typing does not fire a request per key. */
+export function useDebounced(value: string, delayMs = 250): string {
+  const [settled, setSettled] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), delayMs);
+
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return settled;
 }

@@ -1,3 +1,4 @@
+import { Badge } from "@cloudflare/kumo/components/badge";
 import { Button } from "@cloudflare/kumo/components/button";
 import { Empty } from "@cloudflare/kumo/components/empty";
 import { Input } from "@cloudflare/kumo/components/input";
@@ -14,11 +15,11 @@ import {
 } from "@phosphor-icons/react";
 import { useState } from "react";
 import { messageOf } from "../api/client";
-import { useFolder, useMessage } from "../api/queries";
-import type { Folder, Message, MessageSummary } from "../api/schemas";
+import { useFolder, useThread } from "../api/queries";
+import type { Folder, ListedMessage, Message, MessageSummary } from "../api/schemas";
 import { Avatar, Notice, Spinner, Stencil, cx } from "../components/ui";
 import { displayName, fileSize, fullAddress, fullDate, shortDate } from "../lib/format";
-import { hrefFor, useTitle } from "../lib/router";
+import { hrefFor, useDebounced, useTitle } from "../lib/router";
 
 const TITLE = { inbox: "Inbox", sent: "Sent" };
 
@@ -34,13 +35,7 @@ const EMPTY = {
 const counterpart = (message: MessageSummary) =>
   message.folder === "sent" ? (message.to[0] ?? message.from) : message.from;
 
-function matches(message: MessageSummary, needle: string): boolean {
-  const haystack = [message.subject, message.snippet, message.from.name, message.from.address, ...message.to.map((p) => p.address)];
-
-  return haystack.some((value) => value.toLowerCase().includes(needle));
-}
-
-function Row({ message, selected }: { message: MessageSummary; selected: boolean }) {
+function Row({ message, selected }: { message: ListedMessage; selected: boolean }) {
   const who = counterpart(message);
   const label = message.folder === "sent" ? `To ${displayName(who)}` : displayName(who);
 
@@ -58,6 +53,11 @@ function Row({ message, selected }: { message: MessageSummary; selected: boolean
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className={cx("min-w-0 flex-1 truncate text-sm", !message.isRead && "font-semibold")}>{label}</span>
+            {message.threadCount > 1 && (
+              <span aria-label={`${message.threadCount} messages in this conversation`}>
+                <Badge variant="outline">{message.threadCount}</Badge>
+              </span>
+            )}
             {message.hasAttachments && <PaperclipIcon className="size-3.5 shrink-0 self-center text-kumo-subtle" aria-label="Has attachments" />}
             <time className="shrink-0 text-xs text-kumo-subtle tabular-nums">{shortDate(message.date)}</time>
           </div>
@@ -73,14 +73,13 @@ function Row({ message, selected }: { message: MessageSummary; selected: boolean
 }
 
 function MessageList({ folder, selectedId }: { folder: Folder; selectedId: string | null }) {
-  const query = useFolder(folder);
-  const [filter, setFilter] = useState("");
+  const [typed, setTyped] = useState("");
+  const search = useDebounced(typed.trim());
+  const query = useFolder(folder, search);
 
   useTitle(TITLE[folder]);
 
-  const loaded = query.data?.pages.flatMap((page) => page.messages) ?? [];
-  const needle = filter.trim().toLowerCase();
-  const visible = needle ? loaded.filter((message) => matches(message, needle)) : loaded;
+  const visible = query.data?.pages.flatMap((page) => page.messages) ?? [];
 
   return (
     <section aria-label={TITLE[folder]} className="flex min-h-0 w-full flex-col border-kumo-line bg-kumo-base md:w-[24rem] md:shrink-0 md:border-r">
@@ -103,14 +102,14 @@ function MessageList({ folder, selectedId }: { folder: Folder; selectedId: strin
       </header>
       <div className="border-b border-kumo-line px-4 pb-3">
         <Input
-          id={`filter-${folder}`}
+          id={`search-${folder}`}
           type="search"
           size="sm"
           className="w-full"
-          aria-label={`Filter ${TITLE[folder]}`}
-          placeholder="Filter loaded messages"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          aria-label={`Search ${TITLE[folder]}`}
+          placeholder={`Search ${TITLE[folder]}`}
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -122,8 +121,8 @@ function MessageList({ folder, selectedId }: { folder: Folder; selectedId: strin
         )}
         {query.isSuccess && visible.length === 0 && (
           <div className="p-4">
-            {needle ? (
-              <Empty size="sm" icon={<BinocularsIcon size={32} />} title="Nothing on the horizon" description="No loaded message matches that filter." />
+            {search ? (
+              <Empty size="sm" icon={<BinocularsIcon size={32} />} title="Nothing on the horizon" description={`No message in ${TITLE[folder]} contains "${search}".`} />
             ) : (
               <Empty size="sm" icon={<SailboatIcon size={32} />} title={EMPTY[folder].title} description={EMPTY[folder].description} />
             )}
@@ -151,7 +150,7 @@ const REMOTE_IMAGE = /<img\b[^>]*\bsrc\s*=\s*["']?(?:https?:)?\/\//i;
 
 /** Renders an HTML email in a sandboxed frame: no scripts, no remote content. */
 function HtmlBody({ html }: { html: string }) {
-  const [height, setHeight] = useState(240);
+  const [height, setHeight] = useState(120);
 
   const document =
     '<!doctype html><meta charset="utf-8">' +
@@ -181,74 +180,129 @@ function HtmlBody({ html }: { html: string }) {
   );
 }
 
-function Reader({ message, onReply }: { message: Message; onReply: (message: Message) => void }) {
-  useTitle(message.subject || "(no subject)");
-
+/** One message of a conversation: a header that is always shown, and the body when expanded. */
+function ThreadMessage({ message, expanded, onToggle }: { message: Message; expanded: boolean; onToggle: () => void }) {
   // Inline images are part of an HTML body; they are listed as files only when there is no HTML to show them in.
   const files = message.attachments.filter((file) => !file.inline || !message.body.html);
+  const sent = message.folder === "sent";
 
   return (
-    <article className="mx-auto w-full max-w-3xl p-5 md:p-8">
+    <Surface as="article" className="overflow-hidden rounded-lg">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="flex w-full cursor-pointer gap-3 border-0 bg-transparent p-4 text-left text-kumo-default hover:bg-kumo-tint"
+      >
+        <Avatar person={message.from} />
+        <span className="min-w-0 flex-1 text-sm">
+          <span className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-semibold">{sent ? "You" : displayName(message.from)}</span>
+            {expanded && <span className="text-kumo-subtle [overflow-wrap:anywhere]">{message.from.address}</span>}
+            <time className="ml-auto text-xs text-kumo-subtle">{fullDate(message.date)}</time>
+          </span>
+          {expanded ? (
+            <>
+              <span className="block text-kumo-subtle [overflow-wrap:anywhere]">To {message.to.map(fullAddress).join(", ")}</span>
+              {message.cc.length > 0 && (
+                <span className="block text-kumo-subtle [overflow-wrap:anywhere]">Cc {message.cc.map(fullAddress).join(", ")}</span>
+              )}
+            </>
+          ) : (
+            <span className="block truncate text-kumo-subtle">{message.snippet}</span>
+          )}
+        </span>
+      </button>
+      {expanded && (
+        <div className="border-t border-kumo-line p-1">
+          {message.body.html ? (
+            <HtmlBody html={message.body.html} />
+          ) : (
+            <pre className="m-0 p-4 font-sans text-[15px] whitespace-pre-wrap [overflow-wrap:anywhere]">
+              {message.body.text || "(This message has no text.)"}
+            </pre>
+          )}
+          {files.length > 0 && (
+            <ul className="m-0 flex list-none flex-wrap gap-2 p-3">
+              {files.map((file) => (
+                <li key={file.idx}>
+                  <a
+                    href={`/api/messages/${message.id}/attachments/${file.idx}`}
+                    download={file.filename}
+                    className="inline-flex items-center gap-2 rounded-lg bg-kumo-base px-3 py-2 text-sm text-kumo-default no-underline ring ring-kumo-line hover:bg-kumo-tint"
+                  >
+                    <PaperclipIcon className="text-kumo-subtle" aria-hidden="true" />
+                    {file.filename}
+                    <span className="text-xs text-kumo-subtle">{fileSize(file.size)}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Surface>
+  );
+}
+
+interface ConversationProps {
+  messages: ReadonlyArray<Message>;
+  /** The message that was opened from the list. */
+  selectedId: string;
+  onReply: (message: Message) => void;
+}
+
+/** A conversation, oldest first. The opened message starts expanded; the rest open on demand. */
+function Conversation({ messages, selectedId, onReply }: ConversationProps) {
+  const selected = messages.find((message) => message.id === selectedId) ?? messages[messages.length - 1];
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set([selectedId]));
+  // A reply answers the newest message someone else sent, which is the one a person expects to answer.
+  const replyTarget = messages.findLast((message) => message.folder === "inbox");
+
+  useTitle(selected?.subject || "(no subject)");
+
+  function toggle(id: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+
+      if (!next.delete(id)) next.add(id);
+
+      return next;
+    });
+  }
+
+  if (!selected) return null;
+
+  return (
+    <div className="mx-auto w-full max-w-3xl p-5 md:p-8">
       <div className="mb-4 flex items-center gap-2">
         <a
-          href={hrefFor({ name: "mail", folder: message.folder, messageId: null })}
+          href={hrefFor({ name: "mail", folder: selected.folder, messageId: null })}
           className="inline-flex items-center gap-1.5 rounded-lg bg-kumo-base px-3 py-2 text-sm text-kumo-default no-underline ring ring-kumo-line md:hidden"
         >
           <ArrowLeftIcon aria-hidden="true" />
           Back
         </a>
         <span className="flex-1" />
-        {message.folder === "inbox" && (
-          <Button icon={<ArrowBendUpLeftIcon />} onClick={() => onReply(message)}>
+        {replyTarget && (
+          <Button icon={<ArrowBendUpLeftIcon />} onClick={() => onReply(replyTarget)}>
             Reply
           </Button>
         )}
       </div>
-      <h1 className="text-xl font-semibold text-balance">{message.subject || "(no subject)"}</h1>
-      <div className="mt-4 flex gap-3">
-        <Avatar person={message.from} />
-        <div className="min-w-0 flex-1 text-sm">
-          <div className="flex flex-wrap items-baseline gap-x-2">
-            <span className="font-semibold">{displayName(message.from)}</span>
-            <span className="text-kumo-subtle [overflow-wrap:anywhere]">{message.from.address}</span>
-            <time className="ml-auto text-xs text-kumo-subtle">{fullDate(message.date)}</time>
-          </div>
-          <div className="text-kumo-subtle [overflow-wrap:anywhere]">To {message.to.map(fullAddress).join(", ")}</div>
-          {message.cc.length > 0 && <div className="text-kumo-subtle [overflow-wrap:anywhere]">Cc {message.cc.map(fullAddress).join(", ")}</div>}
-        </div>
+      <h1 className="text-xl font-semibold text-balance">{selected.subject || "(no subject)"}</h1>
+      {messages.length > 1 && <p className="mt-1 text-sm text-kumo-subtle">{messages.length} messages in this conversation</p>}
+      <div className="mt-4 grid gap-3">
+        {messages.map((message) => (
+          <ThreadMessage key={message.id} message={message} expanded={expanded.has(message.id)} onToggle={() => toggle(message.id)} />
+        ))}
       </div>
-      <Surface className="mt-5 rounded-lg p-1">
-        {message.body.html ? (
-          <HtmlBody html={message.body.html} />
-        ) : (
-          <pre className="m-0 p-4 font-sans text-[15px] whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {message.body.text || "(This message has no text.)"}
-          </pre>
-        )}
-      </Surface>
-      {files.length > 0 && (
-        <ul className="m-0 mt-4 flex list-none flex-wrap gap-2 p-0">
-          {files.map((file) => (
-            <li key={file.idx}>
-              <a
-                href={`/api/messages/${message.id}/attachments/${file.idx}`}
-                download={file.filename}
-                className="inline-flex items-center gap-2 rounded-lg bg-kumo-base px-3 py-2 text-sm text-kumo-default no-underline ring ring-kumo-line hover:bg-kumo-tint"
-              >
-                <PaperclipIcon className="text-kumo-subtle" aria-hidden="true" />
-                {file.filename}
-                <span className="text-xs text-kumo-subtle">{fileSize(file.size)}</span>
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-    </article>
+    </div>
   );
 }
 
 function ReadingPane({ messageId, onReply }: { messageId: string | null; onReply: (message: Message) => void }) {
-  const query = useMessage(messageId);
+  const query = useThread(messageId);
 
   if (messageId === null) {
     return (
@@ -268,7 +322,8 @@ function ReadingPane({ messageId, onReply }: { messageId: string | null; onReply
     );
   }
 
-  return <Reader message={query.data} onReply={onReply} />;
+  // The key gives each opened message its own expanded state.
+  return <Conversation key={messageId} messages={query.data} selectedId={messageId} onReply={onReply} />;
 }
 
 interface MailPageProps {

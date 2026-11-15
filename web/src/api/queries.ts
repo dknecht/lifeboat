@@ -56,31 +56,43 @@ export const useAcceptInvite = () =>
       post("/auth/accept-invite", S.InviteAccepted, input),
   });
 
-/** A folder's messages, newest first, refreshed every 30 seconds so new mail shows up unprompted. */
-export function useFolder(folder: S.Folder) {
+/**
+ * A folder's messages, newest first, refreshed every 30 seconds so new mail shows up unprompted.
+ * `search` narrows the folder to messages containing those words.
+ */
+export function useFolder(folder: S.Folder, search = "") {
   return useInfiniteQuery({
-    queryKey: ["messages", folder],
-    queryFn: ({ pageParam }) =>
-      get(`/messages?folder=${folder}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`, S.MessageList),
+    queryKey: ["messages", folder, search],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({ folder });
+
+      if (search) params.set("q", search);
+
+      if (pageParam) params.set("cursor", pageParam);
+
+      return get(`/messages?${params}`, S.MessageList);
+    },
     initialPageParam: "",
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchInterval: 30_000,
+    // Keep showing the previous results while a new search is on its way.
+    placeholderData: (previous) => previous,
   });
 }
 
-/** One message with its body. Opening it marks it read, so the folder lists are refreshed. */
-export function useMessage(id: string | null) {
+/** The conversation a message belongs to. Opening it marks that message read, so the lists are refreshed. */
+export function useThread(id: string | null) {
   const client = useQueryClient();
 
   return useQuery({
-    queryKey: ["message", id],
+    queryKey: ["thread", id],
     enabled: id !== null,
     queryFn: async () => {
-      const { message } = await get(`/messages/${id}`, S.MessageEnvelope);
+      const { messages } = await get(`/messages/${id}/thread`, S.Thread);
 
       void client.invalidateQueries({ queryKey: ["messages"] });
 
-      return message;
+      return messages;
     },
     staleTime: 60_000,
   });
@@ -101,7 +113,11 @@ export function useSendMessage() {
 
   return useMutation({
     mutationFn: (draft: Draft) => post("/messages", S.Sent, draft),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["messages", "sent"] }),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: ["messages"] }),
+        client.invalidateQueries({ queryKey: ["thread"] }),
+      ]),
   });
 }
 

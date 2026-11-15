@@ -133,3 +133,49 @@ describe("sending", () => {
     expect((await json(await call("/messages?folder=sent", { headers: { cookie } }))).messages).toHaveLength(0);
   });
 });
+
+describe("search and conversations", () => {
+  it("finds messages by words in the subject, sender, or body, and treats wildcards literally", async () => {
+    const { cookie } = await enrolledUser("kit@example.com");
+
+    await deliverOk("maria@contoso.test", "kit@example.com", rawEmail({ from: "maria@contoso.test", to: "kit@example.com", subject: "Contract renewal", text: "The purchase order is attached." }));
+    await deliverOk("ops@vendor.test", "kit@example.com", rawEmail({ from: "ops@vendor.test", to: "kit@example.com", subject: "Ticket update", text: "No action needed. 100% done." }));
+
+    const search = async (q: string) =>
+      (await json(await call(`/messages?folder=inbox&q=${encodeURIComponent(q)}`, { headers: { cookie } }))).messages.map((m: any) => m.subject);
+
+    expect(await search("RENEWAL")).toEqual(["Contract renewal"]);
+    expect(await search("purchase order")).toEqual(["Contract renewal"]);
+    expect(await search("vendor.test")).toEqual(["Ticket update"]);
+    expect(await search("100%")).toEqual(["Ticket update"]);
+    // A bare wildcard matches nothing, because it is searched for as a literal character.
+    expect(await search("_")).toEqual([]);
+    expect(await search("nothing like this")).toEqual([]);
+    expect((await search("")).length).toBe(2);
+  });
+
+  it("returns a conversation oldest first across Inbox and Sent, and counts it in the list", async () => {
+    const { cookie } = await enrolledUser("lou@example.com");
+    const other = await enrolledUser("max@example.com");
+    const first = await deliverOk("client@other.test", "lou@example.com", rawEmail({ from: "client@other.test", to: "lou@example.com", subject: "Question", text: "Can you confirm?", messageId: "<t1@other.test>" }));
+
+    await call("/messages", { method: "POST", headers: { cookie }, body: { to: ["client@other.test"], subject: "Re: Question", text: "Confirmed.", inReplyToId: first } });
+    await deliverOk("x@y.test", "lou@example.com", rawEmail({ from: "x@y.test", to: "lou@example.com", subject: "Unrelated", text: "hello" }));
+
+    const thread = await json(await call(`/messages/${first}/thread`, { headers: { cookie } }));
+
+    expect(thread.messages.map((m: any) => [m.folder, m.subject])).toEqual([
+      ["inbox", "Question"],
+      ["sent", "Re: Question"],
+    ]);
+    expect(thread.messages[1].body.text).toBe("Confirmed.");
+
+    const list = await json(await call("/messages?folder=inbox", { headers: { cookie } }));
+    const counts = Object.fromEntries(list.messages.map((m: any) => [m.subject, m.threadCount]));
+
+    expect(counts).toEqual({ Question: 2, Unrelated: 1 });
+    // Opening the conversation marks the opened message read.
+    expect(list.messages.find((m: any) => m.subject === "Question").isRead).toBe(true);
+    expect((await call(`/messages/${first}/thread`, { headers: { cookie: other.cookie } })).status).toBe(404);
+  });
+});

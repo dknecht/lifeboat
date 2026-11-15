@@ -61,8 +61,13 @@ export const MessageSummary = Schema.Struct(summaryFields);
 
 export type MessageSummary = typeof MessageSummary.Type;
 
+/** A message as a folder lists it, with the size of the conversation it belongs to. */
+export const ListedMessage = Schema.Struct({ ...summaryFields, threadCount: Schema.Number });
+
+export type ListedMessage = typeof ListedMessage.Type;
+
 export const MessageList = Schema.Struct({
-  messages: Schema.Array(MessageSummary),
+  messages: Schema.Array(ListedMessage),
   nextCursor: Schema.NullOr(Schema.String),
   unread: Schema.Number,
 });
@@ -89,6 +94,9 @@ export const Message = Schema.Struct({
 export type Message = typeof Message.Type;
 
 export const MessageEnvelope = Schema.Struct({ message: Message });
+
+/** A conversation: every message that shares a thread, oldest first. */
+export const Thread = Schema.Struct({ messages: Schema.Array(Message) });
 
 export const LoginResult = Schema.Struct({ user: User });
 export const InviteAccepted = Schema.Struct({ email: Schema.String });

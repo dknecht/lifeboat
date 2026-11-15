@@ -40,7 +40,7 @@ import { AppConfig, Blobs, Db, Mailer, sql, type AppServices } from "./services"
 import { audit, getState } from "./settings";
 import { finishRecoveryIfDrained, runSyncBatch } from "./sync";
 import { decodePeople, type AttachmentRow, type MessageRow, type StoredBody, type UserRow } from "./types";
-import { isValidAddress, normalizeAddress, timingSafeEqual } from "./util";
+import { escapeLike, isValidAddress, normalizeAddress, timingSafeEqual } from "./util";
 
 // ── Request context ──────────────────────────────────────────────────────────
 
@@ -314,22 +314,44 @@ const accessLogin = (ctx: Ctx) =>
 
 const PAGE_SIZE = 50;
 
+/** A message row together with how many messages its conversation holds. */
+type ListedRow = MessageRow & { readonly thread_count: number };
+
+const THREAD_COUNT = `(SELECT COUNT(*) FROM messages t
+  WHERE t.user_id = m.user_id AND t.thread_id IS NOT NULL AND t.thread_id = m.thread_id)`;
+
 const listMessages = (ctx: Ctx) =>
   Effect.gen(function* () {
     const user = yield* requireUser(ctx);
     const db = yield* Db;
     const folder = ctx.url.searchParams.get("folder") === "sent" ? "sent" : "inbox";
+    const query = (ctx.url.searchParams.get("q") ?? "").trim().toLowerCase();
     // The cursor is "<timestamp>.<id>" of the last row on the previous page.
     const [ts, id] = (ctx.url.searchParams.get("cursor") ?? "").split(".");
     const before = Number(ts);
-    const paged = Number.isFinite(before) && before > 0 && id;
+    const conditions = ["m.user_id = ?", "m.folder = ?"];
+    const binds: (string | number)[] = [user.id, folder];
 
-    const rows = yield* db.all<MessageRow>(
+    if (query) {
+      // Messages stored before search existed have no search text, so the subject is matched too.
+      const pattern = `%${escapeLike(query)}%`;
+
+      conditions.push("(m.search_text LIKE ? ESCAPE '\\' OR LOWER(m.subject) LIKE ? ESCAPE '\\')");
+      binds.push(pattern, pattern);
+    }
+
+    if (Number.isFinite(before) && before > 0 && id) {
+      conditions.push("(m.received_at < ? OR (m.received_at = ? AND m.id < ?))");
+      binds.push(before, before, id);
+    }
+
+    const rows = yield* db.all<ListedRow>(
       sql(
-        `SELECT * FROM messages WHERE user_id = ? AND folder = ?
-         ${paged ? "AND (received_at < ? OR (received_at = ? AND id < ?))" : ""}
-         ORDER BY received_at DESC, id DESC LIMIT ?`,
-        ...(paged ? [user.id, folder, before, before, id, PAGE_SIZE + 1] : [user.id, folder, PAGE_SIZE + 1]),
+        `SELECT m.*, ${THREAD_COUNT} AS thread_count FROM messages m
+         WHERE ${conditions.join(" AND ")}
+         ORDER BY m.received_at DESC, m.id DESC LIMIT ?`,
+        ...binds,
+        PAGE_SIZE + 1,
       ),
     );
 
@@ -341,44 +363,88 @@ const listMessages = (ctx: Ctx) =>
     );
 
     return json({
-      messages: page.map(listItem),
+      messages: page.map((row) => ({ ...listItem(row), threadCount: Math.max(row.thread_count, 1) })),
       nextCursor: rows.length > PAGE_SIZE && last ? `${last.received_at}.${last.id}` : null,
       unread: unread?.n ?? 0,
     });
   });
 
+/** Loads a message's body and attachment list for display. */
+const messageDetail = Effect.fn("messageDetail")(function* (row: MessageRow) {
+  const db = yield* Db;
+  const blobs = yield* Blobs;
+  const stored = (yield* blobs.getJson<StoredBody>(`body/${row.id}.json`)) ?? { html: null, text: null };
+
+  const attachments = yield* db.all<AttachmentRow>(
+    sql("SELECT * FROM attachments WHERE message_id = ? ORDER BY idx", row.id),
+  );
+
+  return {
+    ...listItem(row),
+    messageId: row.message_id,
+    body: stored,
+    attachments: attachments.map((a) => ({
+      idx: a.idx,
+      filename: a.filename,
+      contentType: a.content_type,
+      size: a.size,
+      inline: a.disposition === "inline",
+    })),
+  };
+});
+
+/** Finds one of the user's messages and marks it read. */
+const openMessage = Effect.fn("openMessage")(function* (ctx: Ctx) {
+  const user = yield* requireUser(ctx);
+  const db = yield* Db;
+
+  const row = yield* db.first<MessageRow>(
+    sql("SELECT * FROM messages WHERE id = ? AND user_id = ?", ctx.params.id, user.id),
+  );
+
+  if (!row) return yield* notFound("Message not found.");
+
+  if (!row.is_read) yield* db.run(sql("UPDATE messages SET is_read = 1 WHERE id = ?", row.id));
+
+  return { ...row, is_read: 1 } satisfies MessageRow;
+});
+
 const getMessage = (ctx: Ctx) =>
   Effect.gen(function* () {
-    const user = yield* requireUser(ctx);
+    const row = yield* openMessage(ctx);
+
+    return json({ message: yield* messageDetail(row) });
+  });
+
+const THREAD_LIMIT = 50;
+
+/** The whole conversation a message belongs to, oldest first, across Inbox and Sent. */
+const getThread = (ctx: Ctx) =>
+  Effect.gen(function* () {
     const db = yield* Db;
-    const blobs = yield* Blobs;
-    const id = ctx.params.id!;
-    const row = yield* db.first<MessageRow>(sql("SELECT * FROM messages WHERE id = ? AND user_id = ?", id, user.id));
+    const opened = yield* openMessage(ctx);
 
-    if (!row) return yield* notFound("Message not found.");
-    const stored = (yield* blobs.getJson<StoredBody>(`body/${id}.json`)) ?? { html: null, text: null };
+    const rows = opened.thread_id
+      ? yield* db.all<MessageRow>(
+          sql(
+            "SELECT * FROM messages WHERE user_id = ? AND thread_id = ? ORDER BY received_at, id LIMIT ?",
+            opened.user_id,
+            opened.thread_id,
+            THREAD_LIMIT,
+          ),
+        )
+      : [opened];
 
-    const attachments = yield* db.all<AttachmentRow>(
-      sql("SELECT * FROM attachments WHERE message_id = ? ORDER BY idx", id),
+    // The opened message is always shown, even in a conversation longer than the limit.
+    const included = rows.some((row) => row.id === opened.id) ? rows : [...rows, opened];
+
+    const messages = yield* Effect.forEach(
+      included,
+      (row) => messageDetail(row.id === opened.id ? opened : row),
+      { concurrency: 5 },
     );
 
-    if (!row.is_read) yield* db.run(sql("UPDATE messages SET is_read = 1 WHERE id = ?", id));
-
-    return json({
-      message: {
-        ...listItem(row),
-        isRead: true,
-        messageId: row.message_id,
-        body: stored,
-        attachments: attachments.map((a) => ({
-          idx: a.idx,
-          filename: a.filename,
-          contentType: a.content_type,
-          size: a.size,
-          inline: a.disposition === "inline",
-        })),
-      },
-    });
+    return json({ messages });
   });
 
 const getAttachment = (ctx: Ctx) =>
@@ -701,6 +767,7 @@ const routes = [
   route("GET", "/api/messages", listMessages),
   route("POST", "/api/messages", postMessage),
   route("GET", "/api/messages/:id", getMessage),
+  route("GET", "/api/messages/:id/thread", getThread),
   route("GET", "/api/messages/:id/attachments/:idx", getAttachment),
   route("GET", "/api/admin/access-login", accessLogin),
   route("GET", "/api/admin/overview", overview),

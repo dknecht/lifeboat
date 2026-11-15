@@ -123,7 +123,8 @@ audit_log    (id, at, actor, action, detail)
 
 - `messages.user_id` is `NULL` for **held** mail: the recipient matched no known address. Admins can assign held mail to a user.
 - `sync_status` is one of `pending`, `synced`, `failed`, `skipped`. Held mail is `skipped` until assigned.
-- `thread_id` is the first entry of `References`, else `In-Reply-To`, else the message's own ID. The v1 UI lists messages flat; the column exists so threading can be added without a migration.
+- `thread_id` is the first entry of `References`, else `In-Reply-To`, else the message's own ID. It groups messages into conversations.
+- `search_text` holds the lower-cased subject, people, and start of the body that search matches against.
 
 ---
 
@@ -147,7 +148,9 @@ The email subscription is declared without a zone. Naming a zone would make Alch
 
 ### Reading
 
-- Folders: Inbox and Sent. Flat list, newest first, cursor pagination, unread state.
+- Folders: Inbox and Sent, newest first, with cursor pagination, unread state, and a count of the messages in each conversation.
+- Opening a message shows its whole conversation, oldest first, across Inbox and Sent. Messages are grouped by `thread_id`.
+- Search matches words in the subject, the people, and the first 20,000 characters of the body, within the open folder.
 - HTML bodies render in an `<iframe sandbox>` with a restrictive Content Security Policy: no scripts, no remote content. Plain text is the fallback.
 - Attachments download through an authenticated endpoint with `Content-Disposition: attachment`.
 
@@ -226,8 +229,9 @@ All routes are under `/api`. Bodies are JSON.
 | `GET /status` | Failover state and whether an incident is open. Public. |
 | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Session management. |
 | `POST /auth/accept-invite` | Set a password from an invite token. |
-| `GET /messages?folder=&cursor=` | List a folder. |
+| `GET /messages?folder=&q=&cursor=` | List a folder, optionally narrowed by search words. |
 | `GET /messages/:id` | Message with body and attachment list; marks it read. |
+| `GET /messages/:id/thread` | The conversation the message belongs to; marks the message read. |
 | `GET /messages/:id/attachments/:idx` | Download an attachment. |
 | `POST /messages` | Send a message. |
 | `GET /admin/overview` | State, probe health, counts, sync progress. |
@@ -257,7 +261,7 @@ All routes are under `/api`. Bodies are JSON.
 lifeboat/
 ├── SPEC.md, README.md
 ├── alchemy.run.ts      deployment stack
-├── migrations/0001_init.sql
+├── migrations/         schema, and the search and conversation additions
 ├── src/
 │   ├── worker.ts       Alchemy Worker: resources, bindings, fetch/email/cron wiring
 │   ├── app.ts          platform-independent entry points
@@ -276,7 +280,8 @@ lifeboat/
 ├── web/                browser client (React, Kumo, Tailwind, TanStack Query), built into dist/
 ├── site/index.html     landing page
 ├── tools/oxlint/       vendored anti-slop lint rules
-└── test/               Vitest suites running in the Workers runtime
+├── test/               Vitest suites running in the Workers runtime
+└── e2e/                Playwright suite driving the web client in a browser
 ```
 
 ---
@@ -292,7 +297,7 @@ lifeboat/
 | **Personal-address sign-in through Access** | Map a personal address to a work account so that Access's emailed one-time PIN can be used when the work mailbox is down. |
 | **Scheduled directory sync** | Keep users, aliases, shared mailboxes, and distribution groups current automatically. |
 | **Calendar and contacts** | Read-only snapshot of calendars and the global address list, refreshed while healthy. |
-| **Threaded conversations, search, drafts** | `thread_id` is already stored. Search through D1 full-text indexing. |
+| **Drafts and full-text search** | Save unfinished messages. Search currently uses substring matching; D1 full-text indexing would rank results and scale further. |
 | **Inline images and safe remote content** | Rewrite `cid:` references; proxy remote images. |
 | **MIME-faithful import** | Replace the JSON rebuild in sync-back when Microsoft offers a supported MIME import. |
 | **Per-user encryption at rest** | Envelope encryption of bodies with keys derived from user credentials. |

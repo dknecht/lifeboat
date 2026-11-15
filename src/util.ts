@@ -90,3 +90,13 @@ export function intVar(value: string | undefined, fallback: number): number {
 
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
+
+const SEARCH_TEXT_LIMIT = 20_000;
+
+/** Builds the text a message is searched by: lower-cased, whitespace collapsed, and capped in length. */
+export function searchTextOf(parts: ReadonlyArray<string>): string {
+  return parts.join(" ").toLowerCase().replace(/\s+/g, " ").trim().slice(0, SEARCH_TEXT_LIMIT);
+}
+
+/** Escapes the wildcard characters of a SQL LIKE pattern, for use with ESCAPE '\\'. */
+export const escapeLike = (value: string) => value.replace(/[\\%_]/g, (char) => `\\${char}`);

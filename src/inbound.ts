@@ -4,7 +4,7 @@ import { AppConfig, Blobs, Db, sql, type Statement } from "./services";
 import { getOpenIncidentId } from "./settings";
 import type { Person, StoredBody } from "./types";
 import { MAX_MESSAGE_BYTES } from "./types";
-import { htmlToText, snippetOf, newId, normalizeAddress, now } from "./util";
+import { htmlToText, newId, normalizeAddress, now, searchTextOf, snippetOf } from "./util";
 
 /** An inbound message as the mail platform hands it over, before any parsing. */
 export interface InboundEmail {
@@ -73,6 +73,7 @@ export const handleInbound = Effect.fn("handleInbound")(function* (message: Inbo
   let refs: string | null = null;
   let sentAt = now();
   let snippet = "(This message could not be parsed. An administrator can retrieve the original.)";
+  let bodyText = "";
   const attachmentRows: Statement[] = [];
 
   const parsed = yield* Effect.tryPromise(() => PostalMime.parse(raw)).pipe(
@@ -99,7 +100,8 @@ export const handleInbound = Effect.fn("handleInbound")(function* (message: Inbo
     if (Number.isFinite(date)) sentAt = date;
 
     const body: StoredBody = { html: parsed.html ?? null, text: parsed.text ?? null };
-    snippet = snippetOf(body.text ?? (body.html ? htmlToText(body.html) : ""));
+    bodyText = body.text ?? (body.html ? htmlToText(body.html) : "");
+    snippet = snippetOf(bodyText);
     yield* blobs.put(`body/${id}.json`, JSON.stringify(body), "application/json");
 
     for (const [idx, att] of (parsed.attachments ?? []).entries()) {
@@ -157,6 +159,11 @@ export const handleInbound = Effect.fn("handleInbound")(function* (message: Inbo
       owner ? "pending" : "skipped",
     ),
     ...attachmentRows,
+    sql(
+      "UPDATE messages SET search_text = ? WHERE id = ?",
+      searchTextOf([subject, from.name, from.address, ...to.map((person) => person.address), bodyText]),
+      id,
+    ),
   ]);
 
   const accepted: InboundResult = { status: owner ? "stored" : "held", id };
