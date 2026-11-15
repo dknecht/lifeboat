@@ -24,6 +24,7 @@ export default Alchemy.Stack(
   },
   Effect.gen(function* () {
     const worker = yield* Worker;
+
     return { url: worker.url, workerName: worker.workerName };
   }),
 );

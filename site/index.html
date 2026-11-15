@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lifeboat Email Continuity</title>
+<meta name="description" content="Open-source email continuity for Microsoft 365, running on your own Cloudflare account. When Outlook goes dark, the mail still lands.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: hull lettering over sea fog. One loud element (the stencil headline and the
+   international-orange band); everything else is a quiet operations log in Plex. */
+:root {
+  --fog: #e9eef1;        /* page background */
+  --hull: #f7f9fa;       /* raised surfaces */
+  --ink: #0f2233;        /* text, deep navy */
+  --slate: #4c6072;      /* secondary text */
+  --rule: #c5d0d8;       /* lines */
+  --orange: #e8480c;     /* international orange, the colour lifeboats are painted */
+  --orange-ink: #ffffff; /* text on orange */
+  --ok: #17694a;
+  --display: "Big Shoulders Display", "Arial Narrow", "Helvetica Neue Condensed", Impact, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fog: #0b1824; --hull: #12283a; --ink: #e8eef2; --slate: #9db0bf; --rule: #27425a;
+    --orange: #ff6a2b; --orange-ink: #1a0d05; --ok: #6fd3a7;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --fog: #0b1824; --hull: #12283a; --ink: #e8eef2; --slate: #9db0bf; --rule: #27425a;
+  --orange: #ff6a2b; --orange-ink: #1a0d05; --ok: #6fd3a7;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+body { margin: 0; background: var(--fog); color: var(--ink); font: 400 1.0625rem/1.6 var(--body); }
+a { color: inherit; text-underline-offset: 0.2em; }
+:focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; }
+h1, h2, h3, p, ol, ul, dl, dd, figure { margin: 0; }
+h1, h2 { font-family: var(--display); font-weight: 900; text-transform: uppercase; line-height: 0.92; text-wrap: balance; letter-spacing: 0.005em; }
+h1 { font-size: clamp(3.4rem, 10.5vw, 8.5rem); }
+h2 { font-size: clamp(2.2rem, 5.5vw, 4rem); }
+h3 { font: 600 1.0625rem/1.35 var(--body); }
+code, pre, .mono { font-family: var(--mono); font-size: 0.9em; }
+.wrap { max-width: 72rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2.5rem); }
+.measure { max-width: 38rem; }
+.muted { color: var(--slate); }
+section { padding: clamp(3rem, 8vw, 6rem) 0; }
+.eyebrow { font: 500 0.8125rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--slate); display: block; margin-bottom: 1rem; }
+
+/* Top bar */
+.top { display: flex; align-items: center; gap: 1.5rem; padding-top: 1.25rem; padding-bottom: 1.25rem; flex-wrap: wrap; }
+.mark { font: 900 1.75rem/1 var(--display); text-transform: uppercase; text-decoration: none; display: flex; align-items: center; gap: 0.5rem; }
+.mark svg { width: 1.6rem; height: 1.6rem; color: var(--orange); }
+.top nav { margin-left: auto; display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.9375rem; }
+.top nav a { text-decoration: none; }
+.top nav a:hover { text-decoration: underline; }
+
+/* Hero */
+.hero { padding-top: clamp(1.5rem, 4vw, 3rem); }
+.hero h1 em { font-style: normal; color: var(--orange); }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 27rem); gap: clamp(1.5rem, 4vw, 3.5rem); align-items: end; margin-top: clamp(1.5rem, 3vw, 2.5rem); }
+.lede { font-size: clamp(1.125rem, 1.6vw, 1.3125rem); line-height: 1.5; }
+.actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.75rem; }
+.btn { display: inline-block; padding: 0.8rem 1.25rem; font: 600 1rem/1 var(--body); text-decoration: none; border: 2px solid var(--ink); border-radius: 2px; }
+.btn.primary { background: var(--orange); border-color: var(--orange); color: var(--orange-ink); }
+.btn:hover { transform: translateY(-1px); }
+.note { font-size: 0.875rem; margin-top: 1rem; }
+
+/* The MX switch */
+.switch { background: var(--hull); border: 1px solid var(--rule); border-top: 6px solid var(--orange); }
+.switch-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--rule); }
+.switch-tabs button { font: 500 0.8125rem/1 var(--mono); letter-spacing: 0.04em; text-transform: uppercase; padding: 0.85rem 0.5rem; background: none; border: 0; border-right: 1px solid var(--rule); color: var(--slate); cursor: pointer; }
+.switch-tabs button:last-child { border-right: 0; }
+.switch-tabs button[aria-selected="true"] { background: var(--ink); color: var(--fog); }
+.switch-body { padding: 1.1rem 1.25rem 1.25rem; display: grid; gap: 1rem; }
+.switch pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.8125rem; line-height: 1.55; }
+.switch pre b { font-weight: 500; color: var(--orange); }
+.switch .prompt { color: var(--slate); }
+.inbox { border-top: 1px dashed var(--rule); padding-top: 0.9rem; display: grid; gap: 0.45rem; font-size: 0.9375rem; }
+.inbox .where { font: 500 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--slate); }
+.inbox .row { display: flex; justify-content: space-between; gap: 1rem; }
+.inbox .row span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox .row time { font-family: var(--mono); font-size: 0.8125rem; color: var(--slate); font-variant-numeric: tabular-nums; }
+.switch-caption { font-size: 0.875rem; color: var(--slate); }
+
+/* Orange band */
+.band { background: var(--orange); color: var(--orange-ink); padding: clamp(1.75rem, 4vw, 2.75rem) 0; }
+.band p { font: 700 clamp(1.6rem, 4vw, 2.75rem)/1.02 var(--display); text-transform: uppercase; text-wrap: balance; max-width: 26ch; }
+
+/* Three states */
+.states { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 2.5rem; border-top: 2px solid var(--ink); }
+.states li { list-style: none; padding: 1.5rem 1.5rem 0 0; border-right: 1px solid var(--rule); margin-right: 1.5rem; display: grid; gap: 0.6rem; align-content: start; }
+.states li:last-child { border-right: 0; margin-right: 0; }
+.states { padding: 0; }
+.states .num { font: 900 3.5rem/0.9 var(--display); color: var(--orange); }
+.states .mx { font: 400 0.8125rem/1.4 var(--mono); color: var(--slate); }
+
+/* Two columns of plain facts */
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(1.5rem, 5vw, 4rem); margin-top: 2.5rem; }
+.facts { padding: 0; display: grid; gap: 1.1rem; }
+.facts li { list-style: none; padding-left: 1.1rem; border-left: 3px solid var(--orange); }
+.facts li p { color: var(--slate); font-size: 1rem; }
+
+/* Homage */
+.homage { background: var(--ink); color: var(--fog); }
+.homage .eyebrow, .homage .muted { color: color-mix(in srgb, var(--fog) 65%, var(--ink)); }
+.homage h2 { color: var(--fog); }
+.homage-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: clamp(1.5rem, 5vw, 4rem); margin-top: 2rem; align-items: start; }
+.homage p + p { margin-top: 1rem; }
+.lineage { width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
+.lineage-scroll { overflow-x: auto; }
+.lineage th, .lineage td { text-align: left; vertical-align: top; padding: 0.7rem 0.9rem 0.7rem 0; border-bottom: 1px solid color-mix(in srgb, var(--fog) 22%, var(--ink)); }
+.lineage th { font: 500 0.75rem/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--fog) 65%, var(--ink)); white-space: nowrap; }
+.lineage td:first-child { color: color-mix(in srgb, var(--fog) 65%, var(--ink)); white-space: nowrap; }
+.disclaimer { font-size: 0.875rem; margin-top: 1.5rem; }
+
+/* Honest status */
+.status-list { padding: 0; margin-top: 2rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 3rem; }
+.status-list li { list-style: none; display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 0.75rem; align-items: baseline; padding-top: 1rem; border-top: 1px solid var(--rule); }
+.tag { font: 500 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.tag.ok { color: var(--ok); }
+.tag.todo { color: var(--orange); }
+
+/* Deploy */
+.deploy-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: clamp(1.5rem, 5vw, 4rem); margin-top: 2rem; align-items: start; }
+.terminal { background: var(--ink); color: var(--fog); padding: 1.25rem 1.4rem; overflow-x: auto; border-left: 6px solid var(--orange); }
+.terminal pre { margin: 0; font-size: 0.875rem; line-height: 1.7; }
+.terminal .c { color: color-mix(in srgb, var(--fog) 55%, var(--ink)); }
+.reqs { padding-left: 1.1rem; margin-top: 1rem; display: grid; gap: 0.4rem; }
+
+footer { border-top: 1px solid var(--rule); padding: 2rem 0 3rem; font-size: 0.875rem; color: var(--slate); }
+footer .wrap { display: flex; gap: 1rem 2rem; flex-wrap: wrap; justify-content: space-between; }
+
+@media (max-width: 860px) {
+  .hero-grid, .cols, .homage-grid, .deploy-grid, .status-list { grid-template-columns: minmax(0, 1fr); }
+  .states { grid-template-columns: minmax(0, 1fr); }
+  .states li { border-right: 0; margin-right: 0; padding-right: 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--rule); }
+  .states li:last-child { border-bottom: 0; }
+  .top nav { margin-left: 0; width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<header class="wrap top">
+  <a class="mark" href="#top" aria-label="Lifeboat, home">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle><path d="m5.6 5.6 3.6 3.6m5.6 5.6 3.6 3.6m0-12.8-3.6 3.6m-5.6 5.6-3.6 3.6"></path></svg>
+    Lifeboat
+  </a>
+  <nav aria-label="Sections">
+    <a href="#how">How it works</a>
+    <a href="#messageone">MessageOne</a>
+    <a href="#status">Project status</a>
+    <a href="#deploy">Deploy</a>
+  </nav>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="wrap">
+    <h1>When Outlook goes dark, <em>the mail still lands.</em></h1>
+    <div class="hero-grid">
+      <div class="measure">
+        <p class="lede">Lifeboat is open-source email continuity for Microsoft 365. During an outage it receives your domain's mail on Cloudflare, gives everyone a web inbox they can reply from, and copies it all back into Outlook when Microsoft returns.</p>
+        <div class="actions">
+          <a class="btn primary" href="#deploy">Deploy it yourself</a>
+          <a class="btn" href="#how">See how it works</a>
+        </div>
+        <p class="note muted">Runs on your own Cloudflare account. MIT licensed. Early prototype: read the <a href="#status">project status</a> before you rely on it.</p>
+      </div>
+
+      <figure class="switch" aria-labelledby="switch-caption">
+        <div class="switch-tabs" role="tablist" aria-label="Failover state">
+          <button type="button" role="tab" id="tab-standby" aria-controls="switch-panel" aria-selected="false" data-state="standby">Standby</button>
+          <button type="button" role="tab" id="tab-outage" aria-controls="switch-panel" aria-selected="true" data-state="outage">Outage</button>
+          <button type="button" role="tab" id="tab-recovering" aria-controls="switch-panel" aria-selected="false" data-state="recovering">Recovering</button>
+        </div>
+        <div class="switch-body" id="switch-panel" role="tabpanel" aria-labelledby="tab-outage" aria-live="polite">
+          <pre id="switch-dns"><span class="prompt">$ dig +short MX example.com</span>
+<b>12 route1.mx.cloudflare.net.</b>
+<b>48 route2.mx.cloudflare.net.</b>
+<b>87 route3.mx.cloudflare.net.</b></pre>
+          <div class="inbox">
+            <span class="where" id="switch-where">Arriving in Lifeboat</span>
+            <div class="row"><span id="switch-m1">Maria Santos: Contract renewal due Friday</span><time id="switch-t1">09:42</time></div>
+            <div class="row"><span id="switch-m2">Vendor Ops: Ticket 4471 update</span><time id="switch-t2">09:40</time></div>
+          </div>
+          <figcaption class="switch-caption" id="switch-caption">An administrator has declared an outage. MX points at Cloudflare and new mail is readable in seconds.</figcaption>
+        </div>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<div class="band">
+  <div class="wrap"><p>Cloudflare will not share a domain's MX. So failover is a switch you throw, and Lifeboat is what is waiting on the other side.</p></div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <span class="eyebrow">How it works</span>
+    <h2>Three states. A person decides when to change them.</h2>
+    <ol class="states">
+      <li>
+        <span class="num" aria-hidden="true">1</span>
+        <h3>Standby</h3>
+        <p class="mx">MX &rarr; example-com.mail.protection.outlook.com</p>
+        <p>Microsoft 365 handles mail as usual. Lifeboat sits idle with your directory loaded and every user already enrolled. A health probe checks Microsoft every five minutes and tells admins when it stops answering.</p>
+      </li>
+      <li>
+        <span class="num" aria-hidden="true">2</span>
+        <h3>Outage mode</h3>
+        <p class="mx">MX &rarr; route1.mx.cloudflare.net</p>
+        <p>An admin declares the outage and switches MX. Every message is written to storage before it is accepted. Users sign in with a password that does not depend on Microsoft, read their mail, and reply from their real address.</p>
+      </li>
+      <li>
+        <span class="num" aria-hidden="true">3</span>
+        <h3>Recovering</h3>
+        <p class="mx">MX &rarr; example-com.mail.protection.outlook.com</p>
+        <p>Microsoft is back and MX returns to it. Lifeboat writes what it received into each user's Inbox and what they sent into Sent Items, then goes back to standby.</p>
+      </li>
+    </ol>
+
+    <div class="cols">
+      <div>
+        <h3>For the people who need their email</h3>
+        <ul class="facts" style="margin-top:1.1rem">
+          <li><h3>A sign-in that works when Entra does not</h3><p>Each person sets a Lifeboat password in advance, through an invite sent while everything is healthy.</p></li>
+          <li><h3>Replies from their own address</h3><p>Outbound mail goes through Cloudflare Email Sending with DKIM aligned to your domain, and threads correctly.</p></li>
+          <li><h3>Nothing to tidy up afterwards</h3><p>Mail from the outage appears in Outlook as if it had arrived there.</p></li>
+        </ul>
+      </div>
+      <div>
+        <h3>For the admin on call</h3>
+        <ul class="facts" style="margin-top:1.1rem">
+          <li><h3>One console for the whole incident</h3><p>Declare and end the outage, watch sync progress, and read an audit log of every action.</p></li>
+          <li><h3>Held mail instead of bounces</h3><p>Messages to addresses Lifeboat does not recognise wait for you to assign them.</p></li>
+          <li><h3>Your account, your data</h3><p>One Worker, one D1 database, one R2 bucket. No third party holds your mail.</p></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="homage" id="messageone">
+  <div class="wrap">
+    <span class="eyebrow">With thanks to MessageOne</span>
+    <h2>Someone solved this once already.</h2>
+    <div class="homage-grid">
+      <div class="measure">
+        <p>In the 2000s, company email lived on an Exchange server in a room down the hall, and when that server failed, work stopped. MessageOne, of Austin, Texas, built Email Management Services for exactly that day. An administrator activated it, people carried on from a web inbox, and the mail found its way home once Exchange was running again.</p>
+        <p>It worked well enough that Dell bought the company in 2008 for about $155 million.</p>
+        <p>The server down the hall is now someone else's cloud, and the cloud has bad days too. Lifeboat is that same idea rebuilt for Microsoft 365, as software you can read, run on your own account, and change.</p>
+        <p class="disclaimer muted">Lifeboat is an independent open-source project. It is not affiliated with or endorsed by MessageOne, Dell, Microsoft, or Cloudflare, and it shares no code with Email Management Services.</p>
+      </div>
+      <div class="lineage-scroll">
+        <table class="lineage">
+          <thead><tr><th scope="col"></th><th scope="col">Then</th><th scope="col">Now</th></tr></thead>
+          <tbody>
+            <tr><td>Mail lives on</td><td>An Exchange server you own</td><td>Microsoft 365</td></tr>
+            <tr><td>What fails</td><td>A disk, a power supply, a patch</td><td>A region, a sign-in service, a bad rollout</td></tr>
+            <tr><td>Standby</td><td>MessageOne's hosted service</td><td>A Worker on your Cloudflare account</td></tr>
+            <tr><td>Switching over</td><td>An admin activates continuity</td><td>An admin declares an outage and switches MX</td></tr>
+            <tr><td>Afterwards</td><td>Mail is restored to Exchange</td><td>Mail is written back through Microsoft Graph</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="status">
+  <div class="wrap">
+    <span class="eyebrow">Project status</span>
+    <h2>A working prototype, and an honest list.</h2>
+    <p class="measure" style="margin-top:1.25rem">Lifeboat runs end to end on a laptop and passes its test suite. It has not yet been through a live drill against a real Cloudflare zone and a real Microsoft 365 tenant. Treat it as something to evaluate, and run your own drill before an outage does it for you.</p>
+    <ul class="status-list">
+      <li><span class="tag ok">Works</span><span>Receiving, storing, and reading mail, including attachments and aliases.</span></li>
+      <li><span class="tag todo">Unproven</span><span>Sync-back into a real tenant. It uses a Graph technique Microsoft does not document.</span></li>
+      <li><span class="tag ok">Works</span><span>Enrolment, sign-in, lockout, and the admin console.</span></li>
+      <li><span class="tag todo">Unproven</span><span>Switching MX through the Cloudflare API. The manual steps are the default.</span></li>
+      <li><span class="tag ok">Works</span><span>Sending and replying with correct threading, in local development.</span></li>
+      <li><span class="tag todo">By design</span><span>Users see only mail that arrives after the switch. Earlier mail stays with Microsoft.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section id="deploy" style="padding-top:0">
+  <div class="wrap">
+    <span class="eyebrow">Deploy</span>
+    <h2>Set it up on a quiet day.</h2>
+    <div class="deploy-grid">
+      <div>
+        <p>Everything Lifeboat needs during an outage has to exist before one: the users, their passwords, the sending domain, and a low TTL on your MX record.</p>
+        <ul class="reqs">
+          <li>Your mail domain's DNS on Cloudflare</li>
+          <li>A Workers Paid plan, for sending to any recipient</li>
+          <li>A Microsoft Entra app registration, for sync-back</li>
+          <li>Node.js 22 or later</li>
+        </ul>
+      </div>
+      <div class="terminal" tabindex="0" role="group" aria-label="Deploy commands">
+<pre><span class="c"># try it locally, no Cloudflare account needed</span>
+npm install
+cp .env.example .env
+npm run dev
+
+<span class="c"># then deploy the database, bucket, and Worker</span>
+npm run plan
+npm run deploy</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Lifeboat. Built on Cloudflare Workers, D1, R2, and Email Service, with Effect and Alchemy.</span>
+    <span>MIT licence</span>
+  </div>
+</footer>
+
+<script>
+// The hero panel shows what a mail lookup and an inbox look like in each failover state.
+const STATES = {
+  standby: {
+    dns: ["0 example-com.mail.protection.outlook.com."],
+    where: "Arriving in Outlook",
+    rows: [["Maria Santos: Lunch on Thursday?", "08:15"], ["Vendor Ops: Ticket 4471 opened", "08:02"]],
+    caption: "A normal day. Microsoft 365 receives the mail, and Lifeboat waits with every user already enrolled.",
+  },
+  outage: {
+    dns: ["12 route1.mx.cloudflare.net.", "48 route2.mx.cloudflare.net.", "87 route3.mx.cloudflare.net."],
+    where: "Arriving in Lifeboat",
+    rows: [["Maria Santos: Contract renewal due Friday", "09:42"], ["Vendor Ops: Ticket 4471 update", "09:40"]],
+    caption: "An administrator has declared an outage. MX points at Cloudflare and new mail is readable in seconds.",
+  },
+  recovering: {
+    dns: ["0 example-com.mail.protection.outlook.com."],
+    where: "Copied back to Outlook",
+    rows: [["Maria Santos: Contract renewal due Friday", "synced"], ["You: Re: Contract renewal due Friday", "synced"]],
+    caption: "Microsoft is back. Mail from the outage, including replies sent from Lifeboat, is written into each mailbox.",
+  },
+};
+
+const tabs = [...document.querySelectorAll(".switch-tabs button")];
+const byId = (id) => document.getElementById(id);
+
+function show(name) {
+  const state = STATES[name];
+  const prompt = document.createElement("span");
+  prompt.className = "prompt";
+  prompt.textContent = "$ dig +short MX example.com";
+  const lines = state.dns.map((line) => {
+    const mark = document.createElement("b");
+    mark.textContent = line;
+    return mark;
+  });
+  byId("switch-dns").replaceChildren(prompt, ...lines.flatMap((line) => ["\n", line]));
+  byId("switch-where").textContent = state.where;
+  state.rows.forEach(([text, time], index) => {
+    byId(`switch-m${index + 1}`).textContent = text;
+    byId(`switch-t${index + 1}`).textContent = time;
+  });
+  byId("switch-caption").textContent = state.caption;
+  for (const tab of tabs) {
+    const selected = tab.dataset.state === name;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    if (selected) byId("switch-panel").setAttribute("aria-labelledby", tab.id);
+  }
+}
+
+tabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => show(tab.dataset.state));
+  tab.addEventListener("keydown", (event) => {
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+    if (!step) return;
+    const next = tabs[(index + step + tabs.length) % tabs.length];
+    next.focus();
+    show(next.dataset.state);
+  });
+});
+show("outage");
+</script>
+</body>
+</html>

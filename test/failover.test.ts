@@ -7,8 +7,18 @@ import { retentionSweep } from "../src/sync";
 import type { MessageRow } from "../src/types";
 import { ADMIN, call, deliverOk, enrolledUser, rawEmail, run, testEnv } from "./helpers";
 
-const json = async <T = any>(res: Response) => (await res.json()) as T;
-const reply = (body: unknown, status = 200) =>
+/** Reads a response body for assertions; the tests check its contents field by field. */
+const json = (res: Response): Promise<any> => res.json();
+
+/** A JSON response body the fake Graph returns. */
+interface FakeBody {
+  readonly error?: string;
+  readonly access_token?: string;
+  readonly id?: string;
+  readonly value?: ReadonlyArray<{ readonly id: string }>;
+}
+
+const reply = (body: FakeBody, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /** Stands in for Entra ID and Microsoft Graph, recording every call. */
@@ -17,18 +27,28 @@ function fakeGraph(opts: { down?: boolean; failCreate?: boolean } = {}) {
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
     const method = init?.method ?? "GET";
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+    // Graph calls send JSON text; the token request sends form fields, which the tests do not inspect.
+    const text = String(init?.body ?? "");
+    const body = text.startsWith("{") ? JSON.parse(text) : null;
     calls.push({ method, url: decodeURIComponent(url), body });
+
     if (opts.down) return reply({ error: "unavailable" }, 503);
+
     if (url.includes("login.microsoftonline.com")) return reply({ access_token: "tok" });
+
     if (method === "GET" && url.includes("/messages?$filter")) return reply({ value: [] });
+
     if (method === "POST" && url.endsWith("/attachments")) return reply({ id: "att" }, 201);
+
     if (method === "POST" && url.endsWith("/messages")) {
       return opts.failCreate ? reply({ error: "mailbox busy" }, 503) : reply({ id: `graph-${calls.length}` }, 201);
     }
+
     if (url.includes("/mailFolders/inbox?")) return reply({ id: "inbox" });
+
     return reply({ error: `unexpected ${method} ${url}` }, 500);
   });
+
   return calls;
 }
 
@@ -155,12 +175,39 @@ describe("retention and message mapping", () => {
   });
 
   it("maps a sent message to a read Sent Items entry with original times", () => {
-    const row = {
-      direction: "out", folder: "sent", subject: "Hi", from_addr: "a@example.com", from_name: "A",
-      to_json: JSON.stringify([{ address: "b@x.test", name: "B" }]), cc_json: "[]",
-      sent_at: Date.UTC(2026, 10, 14, 10), received_at: Date.UTC(2026, 10, 14, 10), is_read: 0, message_id: "<m@example.com>",
-    } as MessageRow;
-    const msg = buildGraphMessage(row, { html: null, text: "hello" }) as any;
+    const sentAt = Date.UTC(2026, 10, 14, 10);
+
+    const row: MessageRow = {
+      id: "m1",
+      user_id: "u1",
+      rcpt_to: "b@x.test",
+      direction: "out",
+      folder: "sent",
+      incident_id: null,
+      message_id: "<m@example.com>",
+      in_reply_to: null,
+      refs: null,
+      thread_id: null,
+      from_addr: "a@example.com",
+      from_name: "A",
+      to_json: JSON.stringify([{ address: "b@x.test", name: "B" }]),
+      cc_json: "[]",
+      subject: "Hi",
+      snippet: "hello",
+      sent_at: sentAt,
+      received_at: sentAt,
+      size: 5,
+      has_attachments: 0,
+      is_read: 0,
+      auth_results: null,
+      sync_status: "pending",
+      sync_attempts: 0,
+      sync_error: null,
+      synced_at: null,
+      graph_id: null,
+    };
+
+    const msg = buildGraphMessage(row, { html: null, text: "hello" });
     expect(msg.isRead).toBe(true);
     expect(msg.body).toEqual({ contentType: "text", content: "hello" });
     expect(msg.toRecipients).toEqual([{ emailAddress: { address: "b@x.test", name: "B" } }]);

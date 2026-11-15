@@ -14,9 +14,11 @@ export { handleApi as handleRequest, handleInbound };
 /** The periodic job: probe Microsoft 365, drain sync-back while recovering, and apply retention. */
 export const handleScheduled = Effect.gen(function* () {
   yield* runProbe;
+
   if ((yield* getState) === "recovering") {
     yield* runSyncBatch(20);
     yield* finishRecoveryIfDrained;
   }
+
   yield* retentionSweep();
 });

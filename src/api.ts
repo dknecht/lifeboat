@@ -35,7 +35,7 @@ import { SendInput, sendMessage } from "./outbound";
 import { AppConfig, Blobs, Db, Mailer, sql, type AppServices } from "./services";
 import { audit, getState } from "./settings";
 import { finishRecoveryIfDrained, runSyncBatch } from "./sync";
-import type { AttachmentRow, MessageRow, StoredBody, UserRow } from "./types";
+import { decodePeople, type AttachmentRow, type MessageRow, type StoredBody, type UserRow } from "./types";
 import { isValidAddress, normalizeAddress, timingSafeEqual } from "./util";
 
 // ── Request context ──────────────────────────────────────────────────────────
@@ -49,7 +49,8 @@ interface Ctx {
   readonly actor: Actor | null;
 }
 
-const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+/** Builds a JSON response. Each handler passes its own typed view of the data. */
+const json = <Body extends object>(body: Body, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers },
@@ -66,12 +67,19 @@ const cookie = (request: Request, name: string) =>
 const resolveActor = Effect.fn("resolveActor")(function* (request: Request) {
   const config = yield* AppConfig;
   const bearer = request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
+
   if (bearer && config.adminToken && timingSafeEqual(bearer, Redacted.value(config.adminToken))) {
-    return { kind: "token" } as Actor;
+    const automation: Actor = { kind: "token" };
+
+    return automation;
   }
+
   const token = cookie(request, SESSION_COOKIE);
   const user = token ? yield* getSessionUser(token) : null;
-  return user ? ({ kind: "user", user } as Actor) : null;
+
+  const signedIn: Actor | null = user ? { kind: "user", user } : null;
+
+  return signedIn;
 });
 
 const requireUser = (ctx: Ctx) =>
@@ -80,7 +88,9 @@ const requireUser = (ctx: Ctx) =>
 /** Admits administrators and the automation token, and returns a name for the audit log. */
 const requireAdmin = (ctx: Ctx) => {
   if (!ctx.actor) return Effect.fail(unauthorized());
+
   if (ctx.actor.kind === "token") return Effect.succeed("admin-token");
+
   return ctx.actor.user.role === "admin" ? Effect.succeed(ctx.actor.user.email) : Effect.fail(forbidden());
 };
 
@@ -102,8 +112,8 @@ function listItem(m: MessageRow) {
     id: m.id,
     folder: m.folder,
     from: { address: m.from_addr, name: m.from_name },
-    to: JSON.parse(m.to_json),
-    cc: JSON.parse(m.cc_json),
+    to: decodePeople(m.to_json),
+    cc: decodePeople(m.cc_json),
     rcptTo: m.rcpt_to,
     subject: m.subject,
     snippet: m.snippet,
@@ -122,18 +132,24 @@ const InviteAcceptance = Schema.Struct({ token: Schema.String, password: Schema.
 const status = () =>
   Effect.gen(function* () {
     const config = yield* AppConfig;
+
     return json({ state: yield* getState, domain: config.mailDomain });
   });
 
 const postLogin = (ctx: Ctx) =>
   Effect.gen(function* () {
     const input = yield* body(ctx, Credentials, "Enter your email address and password.");
-    const result = yield* login(input.email, input.password);
-    if (!result.ok) {
-      return yield* result.reason === "locked"
-        ? new ApiError({ status: 429, message: "Too many failed attempts. Try again in 15 minutes." })
-        : new ApiError({ status: 401, message: "The email address or password is incorrect." });
-    }
+
+    const result = yield* login(input.email, input.password).pipe(
+      Effect.catchTag("LoginRejected", (rejection) =>
+        Effect.fail(
+          rejection.reason === "locked"
+            ? new ApiError({ status: 429, message: "Too many failed attempts. Try again in 15 minutes." })
+            : new ApiError({ status: 401, message: "The email address or password is incorrect." }),
+        ),
+      ),
+    );
+
     return json({ user: publicUser(result.user) }, 200, {
       "set-cookie": sessionCookie(result.token, isSecure(ctx)),
     });
@@ -142,27 +158,35 @@ const postLogin = (ctx: Ctx) =>
 const postAcceptInvite = (ctx: Ctx) =>
   Effect.gen(function* () {
     const input = yield* body(ctx, InviteAcceptance, "The invite link is incomplete.");
+
     if (input.password.length < MIN_PASSWORD_LENGTH) {
       return yield* badRequest(`Choose a password of at least ${MIN_PASSWORD_LENGTH} characters.`);
     }
+
     const user = yield* acceptInvite(input.token, input.password);
+
     if (!user) {
       return yield* badRequest("This invite link is invalid or has expired. Ask an administrator for a new one.");
     }
+
     yield* audit(user.email, "user.enrolled");
+
     return json({ email: user.email });
   });
 
 const postLogout = (ctx: Ctx) =>
   Effect.gen(function* () {
     const token = cookie(ctx.request, SESSION_COOKIE);
+
     if (token) yield* logout(token);
+
     return json({ ok: true }, 200, { "set-cookie": sessionCookie("", isSecure(ctx), true) });
   });
 
 const getMe = (ctx: Ctx) =>
   Effect.gen(function* () {
     const user = yield* requireUser(ctx);
+
     return json({
       user: publicUser(user),
       addresses: yield* getUserAddresses(user.id),
@@ -183,6 +207,7 @@ const listMessages = (ctx: Ctx) =>
     const [ts, id] = (ctx.url.searchParams.get("cursor") ?? "").split(".");
     const before = Number(ts);
     const paged = Number.isFinite(before) && before > 0 && id;
+
     const rows = yield* db.all<MessageRow>(
       sql(
         `SELECT * FROM messages WHERE user_id = ? AND folder = ?
@@ -191,11 +216,14 @@ const listMessages = (ctx: Ctx) =>
         ...(paged ? [user.id, folder, before, before, id, PAGE_SIZE + 1] : [user.id, folder, PAGE_SIZE + 1]),
       ),
     );
+
     const page = rows.slice(0, PAGE_SIZE);
     const last = page[page.length - 1];
+
     const unread = yield* db.first<{ n: number }>(
       sql("SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND folder = 'inbox' AND is_read = 0", user.id),
     );
+
     return json({
       messages: page.map(listItem),
       nextCursor: rows.length > PAGE_SIZE && last ? `${last.received_at}.${last.id}` : null,
@@ -210,12 +238,16 @@ const getMessage = (ctx: Ctx) =>
     const blobs = yield* Blobs;
     const id = ctx.params.id!;
     const row = yield* db.first<MessageRow>(sql("SELECT * FROM messages WHERE id = ? AND user_id = ?", id, user.id));
+
     if (!row) return yield* notFound("Message not found.");
     const stored = (yield* blobs.getJson<StoredBody>(`body/${id}.json`)) ?? { html: null, text: null };
+
     const attachments = yield* db.all<AttachmentRow>(
       sql("SELECT * FROM attachments WHERE message_id = ? ORDER BY idx", id),
     );
+
     if (!row.is_read) yield* db.run(sql("UPDATE messages SET is_read = 1 WHERE id = ?", id));
+
     return json({
       message: {
         ...listItem(row),
@@ -238,6 +270,7 @@ const getAttachment = (ctx: Ctx) =>
     const user = yield* requireUser(ctx);
     const db = yield* Db;
     const blobs = yield* Blobs;
+
     const att = yield* db.first<AttachmentRow>(
       sql(
         `SELECT a.* FROM attachments a JOIN messages m ON m.id = a.message_id
@@ -247,8 +280,11 @@ const getAttachment = (ctx: Ctx) =>
         user.id,
       ),
     );
+
     const stream = att ? yield* blobs.getStream(`att/${att.message_id}/${att.idx}`) : null;
+
     if (!att || !stream) return yield* notFound("Attachment not found.");
+
     // Always a download with a generic type, so that an attachment can never run in the app's origin.
     return new Response(stream, {
       headers: {
@@ -264,6 +300,7 @@ const postMessage = (ctx: Ctx) =>
   Effect.gen(function* () {
     const user = yield* requireUser(ctx);
     const input = yield* body(ctx, SendInput, "The message is missing recipients or is malformed.");
+
     return json(yield* sendMessage(user, input), 201);
   });
 
@@ -275,9 +312,10 @@ const overview = (ctx: Ctx) =>
     const config = yield* AppConfig;
     const db = yield* Db;
     const state = yield* getState;
+
     const [sync, users, held, incident] = yield* Effect.all(
       [
-        db.all<{ status: string; n: number }>(
+        db.all<{ status: MessageRow["sync_status"]; n: number }>(
           sql("SELECT sync_status AS status, COUNT(*) AS n FROM messages GROUP BY sync_status"),
         ),
         db.first<{ total: number; enrolled: number | null }>(
@@ -288,8 +326,11 @@ const overview = (ctx: Ctx) =>
       ],
       { concurrency: "unbounded" },
     );
-    const counts: Record<string, number> = { pending: 0, synced: 0, failed: 0, skipped: 0 };
+
+    const counts = { pending: 0, synced: 0, failed: 0, skipped: 0 };
+
     for (const r of sync) counts[r.status] = r.n;
+
     return json({
       state,
       domain: config.mailDomain,
@@ -316,12 +357,14 @@ const postActivate = (ctx: Ctx) =>
   Effect.gen(function* () {
     const actor = yield* requireAdmin(ctx);
     const input = yield* body(ctx, Schema.Struct({ reason: Schema.optional(Schema.String) }), "Invalid request.");
+
     return json(yield* activate(actor, input.reason ?? ""));
   });
 
 const postDeactivate = (ctx: Ctx) =>
   Effect.gen(function* () {
     const actor = yield* requireAdmin(ctx);
+
     return json(yield* deactivate(actor));
   });
 
@@ -329,6 +372,7 @@ const listUsers = (ctx: Ctx) =>
   Effect.gen(function* () {
     yield* requireAdmin(ctx);
     const db = yield* Db;
+
     const rows = yield* db.all<{
       id: string;
       email: string;
@@ -343,6 +387,7 @@ const listUsers = (ctx: Ctx) =>
          FROM users u ORDER BY u.email LIMIT 1000`,
       ),
     );
+
     return json({
       users: rows.map((u) => ({
         id: u.id,
@@ -357,6 +402,7 @@ const listUsers = (ctx: Ctx) =>
 
 const inviteLink = Effect.fn("inviteLink")(function* (userId: string) {
   const config = yield* AppConfig;
+
   return `${config.appUrl}/#/invite/${yield* issueInvite(userId)}`;
 });
 
@@ -372,9 +418,12 @@ const postUser = (ctx: Ctx) =>
     const actor = yield* requireAdmin(ctx);
     const input = yield* body(ctx, NewUserInput, "Enter a valid email address.");
     const email = normalizeAddress(input.email);
+
     if (!isValidAddress(email)) return yield* badRequest("Enter a valid email address.");
     const badAlias = (input.aliases ?? []).find((a) => !isValidAddress(normalizeAddress(a)));
+
     if (badAlias) return yield* badRequest(`"${badAlias}" is not a valid email address.`);
+
     if (yield* getUserByEmail(email)) return yield* conflict("A user with this email address already exists.");
 
     const { user } = yield* createUser({
@@ -383,8 +432,10 @@ const postUser = (ctx: Ctx) =>
       role: input.role === "admin" ? "admin" : "user",
       aliases: input.aliases,
     });
+
     const link = yield* inviteLink(user.id);
     yield* audit(actor, "user.create", `${email} (${user.role})`);
+
     return json({ user: publicUser(user), inviteLink: link }, 201);
   });
 
@@ -395,6 +446,7 @@ const postInvite = (ctx: Ctx) =>
     const mailer = yield* Mailer;
     const input = yield* body(ctx, Schema.Struct({ send: Schema.optional(Schema.Boolean) }), "Invalid request.");
     const user = yield* getUserById(ctx.params.id!);
+
     if (!user) return yield* notFound("User not found.");
     const link = yield* inviteLink(user.id);
 
@@ -417,22 +469,27 @@ const postInvite = (ctx: Ctx) =>
             }),
           )
       : { sent: false as const };
+
     yield* audit(actor, "user.invite", user.email);
+
     return json({ inviteLink: link, ...delivery });
   });
 
 const postDirectorySync = (ctx: Ctx) =>
   Effect.gen(function* () {
     const actor = yield* requireAdmin(ctx);
+
     const directory = yield* getGraphToken.pipe(
       Effect.flatMap(listDirectoryUsers),
       Effect.catchTag("GraphError", (e) =>
         Effect.fail(new ApiError({ status: 502, message: `The directory could not be read: ${e.message}` })),
       ),
     );
+
     const results = yield* Effect.forEach(directory, (entry) => createUser(entry));
     const created = results.filter((r) => r.created).length;
     yield* audit(actor, "directory.sync", `${directory.length} found, ${created} new`);
+
     return json({ found: directory.length, created });
   });
 
@@ -440,9 +497,11 @@ const listHeld = (ctx: Ctx) =>
   Effect.gen(function* () {
     yield* requireAdmin(ctx);
     const db = yield* Db;
+
     const rows = yield* db.all<MessageRow>(
       sql("SELECT * FROM messages WHERE user_id IS NULL ORDER BY received_at DESC LIMIT 200"),
     );
+
     return json({ messages: rows.map(listItem) });
   });
 
@@ -452,7 +511,9 @@ const postAssignHeld = (ctx: Ctx) =>
     const db = yield* Db;
     const input = yield* body(ctx, Schema.Struct({ email: Schema.String }), "Enter the user's email address.");
     const user = yield* getUserByEmail(input.email);
+
     if (!user) return yield* notFound("No user has that email address.");
+
     const changed = yield* db.run(
       sql(
         "UPDATE messages SET user_id = ?, sync_status = 'pending' WHERE id = ? AND user_id IS NULL",
@@ -460,8 +521,10 @@ const postAssignHeld = (ctx: Ctx) =>
         ctx.params.id,
       ),
     );
+
     if (!changed) return yield* notFound("Held message not found.");
     yield* audit(actor, "held.assign", `${ctx.params.id} -> ${user.email}`);
+
     return json({ ok: true });
   });
 
@@ -469,17 +532,21 @@ const postSyncRun = (ctx: Ctx) =>
   Effect.gen(function* () {
     const actor = yield* requireAdmin(ctx);
     const db = yield* Db;
+
     const input = yield* body(
       ctx,
       Schema.Struct({ retryFailed: Schema.optional(Schema.Boolean) }),
       "Invalid request.",
     );
+
     if (input.retryFailed) {
       yield* db.run(sql("UPDATE messages SET sync_status = 'pending', sync_attempts = 0 WHERE sync_status = 'failed'"));
     }
+
     const summary = yield* runSyncBatch();
     yield* finishRecoveryIfDrained;
     yield* audit(actor, "sync.run", JSON.stringify(summary));
+
     return json({ ...summary, state: yield* getState });
   });
 
@@ -487,12 +554,14 @@ const listAudit = (ctx: Ctx) =>
   Effect.gen(function* () {
     yield* requireAdmin(ctx);
     const db = yield* Db;
+
     return json({ entries: yield* db.all(sql("SELECT * FROM audit_log ORDER BY id DESC LIMIT 100")) });
   });
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
 type Handler = (ctx: Ctx) => Effect.Effect<Response, RouteError, AppServices>;
+
 type RouteError = ApiError | DbError | BlobError | FailoverError | GraphError | GraphNotConfigured;
 
 const route = (method: string, path: string, handler: Handler) => ({
@@ -524,8 +593,9 @@ const routes = [
   route("GET", "/api/admin/audit", listAudit),
 ];
 
-const serverError = (label: string, detail: unknown) =>
-  Effect.logError(label, detail).pipe(Effect.as(json({ error: "Something went wrong on the server." }, 500)));
+/** Logs an unexpected failure and answers without revealing its details. */
+const serverError = (logged: Effect.Effect<void>) =>
+  logged.pipe(Effect.as(json({ error: "Something went wrong on the server." }, 500)));
 
 /** Handles one API request. Every failure is turned into a JSON response; this never fails. */
 export const handleApi = (request: Request): Effect.Effect<Response, never, AppServices> =>
@@ -535,6 +605,7 @@ export const handleApi = (request: Request): Effect.Effect<Response, never, AppS
     // Cross-site form posts cannot set a JSON content type, so requiring one blocks CSRF.
     if (!["GET", "HEAD"].includes(request.method)) {
       const type = request.headers.get("content-type") ?? "";
+
       if (!type.toLowerCase().startsWith("application/json")) {
         return yield* new ApiError({ status: 415, message: "Requests must use Content-Type: application/json." });
       }
@@ -543,10 +614,13 @@ export const handleApi = (request: Request): Effect.Effect<Response, never, AppS
     for (const candidate of routes) {
       if (candidate.method !== request.method) continue;
       const match = candidate.pattern.exec(url.pathname);
+
       if (!match) continue;
       const actor = yield* resolveActor(request);
+
       return yield* candidate.handler({ request, url, params: match.groups ?? {}, actor });
     }
+
     return yield* notFound("Not found.");
   }).pipe(
     Effect.catchTags({
@@ -554,8 +628,8 @@ export const handleApi = (request: Request): Effect.Effect<Response, never, AppS
       FailoverError: (e) => Effect.succeed(json({ error: e.message }, 409)),
       GraphNotConfigured: (e) => Effect.succeed(json({ error: e.message }, 400)),
       GraphError: (e) => Effect.succeed(json({ error: e.message }, 502)),
-      DbError: (e) => serverError("Database error", e.cause),
-      BlobError: (e) => serverError("Storage error", e.cause),
+      DbError: (e) => serverError(Effect.logError("Database error", e.cause)),
+      BlobError: (e) => serverError(Effect.logError("Storage error", e.cause)),
     }),
-    Effect.catchCause((cause) => serverError("Unhandled failure", cause)),
+    Effect.catchCause((cause) => serverError(Effect.logError("Unhandled failure", cause))),
   );

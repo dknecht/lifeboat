@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { ADMIN, call, enrolledUser } from "./helpers";
 
-const json = async <T = any>(res: Response) => (await res.json()) as T;
+/** Reads a response body for assertions; the tests check its contents field by field. */
+const json = (res: Response): Promise<any> => res.json();
 
 describe("accounts", () => {
   it("bootstraps a user with the admin token and enrolls through the invite link", async () => {
@@ -40,6 +41,7 @@ describe("accounts", () => {
     for (let i = 0; i < 4; i++) {
       expect((await call("/auth/login", { method: "POST", body: { email: "jo@example.com", password: "wrong password!" } })).status).toBe(401);
     }
+
     expect((await call("/auth/login", { method: "POST", body: { email: "jo@example.com", password: "wrong password!" } })).status).toBe(429);
     // The right password is refused while the lock holds.
     expect((await call("/auth/login", { method: "POST", body: { email: "jo@example.com", password: "correct horse battery" } })).status).toBe(429);
@@ -60,6 +62,7 @@ describe("accounts", () => {
       headers: { "content-type": "application/x-www-form-urlencoded" },
       rawBody: "email=a&password=b",
     });
+
     expect(res.status).toBe(415);
   });
 });

@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { call, deliver, deliverOk, enrolledUser, outbox, rawEmail, testEnv } from "./helpers";
 
-const json = async <T = any>(res: Response) => (await res.json()) as T;
+/** Reads a response body for assertions; the tests check its contents field by field. */
+const json = (res: Response): Promise<any> => res.json();
 
 describe("inbound mail", () => {
   it("stores a message for a known user and shows it in their inbox", async () => {
     const { cookie } = await enrolledUser("ana@example.com");
     const raw = rawEmail({ from: "client@other.test", to: "ana@example.com", subject: "Quarterly numbers", text: "Hello Ana,\r\nnumbers attached." });
     const result = await deliver("client@other.test", "ana@example.com", raw);
+
     if (result.status !== "stored") throw new Error(`expected stored, got ${result.status}`);
 
     const stored = await testEnv.MAIL.get(`raw/${result.id}.eml`);
@@ -46,6 +48,7 @@ describe("inbound mail", () => {
     const user = await enrolledUser("cy@example.com");
     const raw = rawEmail({ from: "x@y.test", to: "typo@example.com", subject: "Misaddressed", text: "hi" });
     const result = await deliver("x@y.test", "typo@example.com", raw);
+
     if (result.status !== "held") throw new Error(`expected held, got ${result.status}`);
 
     expect((await json(await call("/messages", { headers: { cookie: user.cookie } }))).messages).toHaveLength(0);
@@ -93,6 +96,7 @@ describe("sending", () => {
       headers: { cookie },
       body: { to: ["client@other.test"], subject: "Re: Question", text: "Confirmed.", inReplyToId: id, attachments: [{ filename: "note.txt", contentType: "text/plain", contentBase64: btoa("ok") }] },
     });
+
     expect(res.status).toBe(201);
     expect(sent()).toHaveLength(1);
     expect(sent()[0]).toMatchObject({

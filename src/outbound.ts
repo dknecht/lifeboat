@@ -6,7 +6,7 @@ import { Blobs, Db, Mailer, sql, type Statement } from "./services";
 import { getOpenIncidentId } from "./settings";
 import type { MessageRow, OutgoingEmail, Person, StoredBody, UserRow } from "./types";
 import { MAX_MESSAGE_BYTES, MAX_RECIPIENTS } from "./types";
-import { escapeHtml, fromBase64, isValidAddress, makeSnippet, newId, normalizeAddress, now } from "./util";
+import { escapeHtml, fromBase64, isValidAddress, snippetOf, newId, normalizeAddress, now } from "./util";
 
 /** The body of `POST /api/messages`. */
 export const SendInput = Schema.Struct({
@@ -26,6 +26,7 @@ export const SendInput = Schema.Struct({
     ),
   ),
 });
+
 export type SendInput = typeof SendInput.Type;
 
 const cleanList = (list: ReadonlyArray<string> | undefined) => [
@@ -40,13 +41,17 @@ export const sendMessage = Effect.fn("sendMessage")(function* (user: UserRow, in
 
   const own = yield* getUserAddresses(user.id);
   const from = normalizeAddress(input.from ?? user.email);
+
   if (!own.includes(from)) return yield* badRequest("You can only send from your own address.");
 
   const to = cleanList(input.to);
   const cc = cleanList(input.cc);
+
   if (!to.length) return yield* badRequest("Add at least one recipient.");
   const invalid = [...to, ...cc].find((a) => !isValidAddress(a));
+
   if (invalid) return yield* badRequest(`"${invalid}" is not a valid email address.`);
+
   if (to.length + cc.length > MAX_RECIPIENTS) {
     return yield* badRequest(`A message can have at most ${MAX_RECIPIENTS} recipients.`);
   }
@@ -65,26 +70,26 @@ export const sendMessage = Effect.fn("sendMessage")(function* (user: UserRow, in
       catch: () => badRequest(`Attachment "${a.filename}" could not be read.`),
     }),
   );
+
   const size = text.length + attachments.reduce((n, a) => n + a.bytes.byteLength, 0);
+
   // Base64 inflates attachments by a third on the wire.
   if (size * 1.37 > MAX_MESSAGE_BYTES) return yield* badRequest("The message is larger than 25 MB.");
 
   // Threading headers, taken from the message being replied to.
   let inReplyTo: string | null = null;
   let refs: string | null = null;
+
   if (input.inReplyToId) {
     const parent = yield* db.first<Pick<MessageRow, "message_id" | "refs">>(
       sql("SELECT message_id, refs FROM messages WHERE id = ? AND user_id = ?", input.inReplyToId, user.id),
     );
+
     if (parent?.message_id) {
       inReplyTo = parent.message_id;
       refs = [parent.refs, parent.message_id].filter(Boolean).join(" ");
     }
   }
-
-  const headers: Record<string, string> = {};
-  if (inReplyTo) headers["In-Reply-To"] = inReplyTo;
-  if (refs) headers["References"] = refs;
 
   const email: OutgoingEmail = {
     from: user.display_name ? { email: from, name: user.display_name } : from,
@@ -92,19 +97,20 @@ export const sendMessage = Effect.fn("sendMessage")(function* (user: UserRow, in
     subject,
     text,
     html: `<div style="white-space:pre-wrap;font-family:sans-serif">${escapeHtml(text)}</div>`,
-    ...(cc.length ? { cc } : {}),
-    ...(Object.keys(headers).length ? { headers } : {}),
-    ...(attachments.length
-      ? {
-          attachments: attachments.map((a) => ({
-            content: a.base64,
-            filename: a.filename,
-            type: a.contentType,
-            disposition: "attachment" as const,
-          })),
-        }
-      : {}),
   };
+
+  if (cc.length) email.cc = cc;
+
+  if (inReplyTo && refs) email.headers = { "In-Reply-To": inReplyTo, References: refs };
+
+  if (attachments.length) {
+    email.attachments = attachments.map((a) => ({
+      content: a.base64,
+      filename: a.filename,
+      type: a.contentType,
+      disposition: "attachment",
+    }));
+  }
 
   const sent = yield* mailer.send(email).pipe(
     Effect.tapError((error) => Effect.logError("Send failed", error)),
@@ -123,6 +129,7 @@ export const sendMessage = Effect.fn("sendMessage")(function* (user: UserRow, in
   yield* blobs.put(`body/${id}.json`, JSON.stringify(body), "application/json");
 
   const attachmentRows: Statement[] = [];
+
   for (const [idx, a] of attachments.entries()) {
     yield* blobs.put(`att/${id}/${idx}`, a.bytes, a.contentType);
     attachmentRows.push(
@@ -159,7 +166,7 @@ export const sendMessage = Effect.fn("sendMessage")(function* (user: UserRow, in
       JSON.stringify(asPeople(to)),
       JSON.stringify(asPeople(cc)),
       subject,
-      makeSnippet(text),
+      snippetOf(text),
       ts,
       ts,
       size,
@@ -167,5 +174,6 @@ export const sendMessage = Effect.fn("sendMessage")(function* (user: UserRow, in
     ),
     ...attachmentRows,
   ]);
+
   return { id };
 });

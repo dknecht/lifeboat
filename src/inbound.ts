@@ -4,7 +4,7 @@ import { AppConfig, Blobs, Db, sql, type Statement } from "./services";
 import { getOpenIncidentId } from "./settings";
 import type { Person, StoredBody } from "./types";
 import { MAX_MESSAGE_BYTES } from "./types";
-import { htmlToText, makeSnippet, newId, normalizeAddress, now } from "./util";
+import { htmlToText, snippetOf, newId, normalizeAddress, now } from "./util";
 
 /** An inbound message as the mail platform hands it over, before any parsing. */
 export interface InboundEmail {
@@ -22,6 +22,8 @@ export type InboundResult =
   | { readonly status: "stored" | "held"; readonly id: string }
   /** The message must be refused with a permanent SMTP error carrying `reason`. */
   | { readonly status: "rejected"; readonly reason: string };
+
+const rejected = (reason: string): InboundResult => ({ status: "rejected", reason });
 
 function people(list: { address?: string; name?: string }[] | undefined): Person[] {
   return (list ?? [])
@@ -45,13 +47,14 @@ export const handleInbound = Effect.fn("handleInbound")(function* (message: Inbo
   const blobs = yield* Blobs;
 
   if (message.size > MAX_MESSAGE_BYTES) {
-    return { status: "rejected", reason: "Message too large" } as InboundResult;
+    return rejected("Message too large");
   }
 
   const rcpt = normalizeAddress(message.to);
   const owner = yield* db.first<{ user_id: string }>(sql("SELECT user_id FROM addresses WHERE address = ?", rcpt));
+
   if (!owner && config.unknownRecipient === "reject") {
-    return { status: "rejected", reason: "Address does not exist" } as InboundResult;
+    return rejected("Address does not exist");
   }
 
   const id = newId();
@@ -79,25 +82,34 @@ export const handleInbound = Effect.fn("handleInbound")(function* (message: Inbo
 
   if (parsed) {
     subject = parsed.subject ?? subject;
+
     if (parsed.from?.address) {
       from = { address: normalizeAddress(parsed.from.address), name: parsed.from.name ?? "" };
     }
+
     const parsedTo = people(parsed.to);
+
     if (parsedTo.length) to = parsedTo;
     cc = people(parsed.cc);
     messageId = parsed.messageId ?? messageId;
     inReplyTo = parsed.inReplyTo ?? null;
     refs = parsed.references ?? null;
     const date = parsed.date ? Date.parse(parsed.date) : NaN;
+
     if (Number.isFinite(date)) sentAt = date;
 
     const body: StoredBody = { html: parsed.html ?? null, text: parsed.text ?? null };
-    snippet = makeSnippet(body.text ?? (body.html ? htmlToText(body.html) : ""));
+    snippet = snippetOf(body.text ?? (body.html ? htmlToText(body.html) : ""));
     yield* blobs.put(`body/${id}.json`, JSON.stringify(body), "application/json");
 
     for (const [idx, att] of (parsed.attachments ?? []).entries()) {
       const content =
-        typeof att.content === "string" ? new TextEncoder().encode(att.content) : new Uint8Array(att.content);
+        att.content instanceof ArrayBuffer
+          ? new Uint8Array(att.content)
+          : att.content instanceof Uint8Array
+            ? att.content
+            : new TextEncoder().encode(att.content);
+
       const contentType = att.mimeType || "application/octet-stream";
       yield* blobs.put(`att/${id}/${idx}`, content, contentType);
       attachmentRows.push(
@@ -147,5 +159,7 @@ export const handleInbound = Effect.fn("handleInbound")(function* (message: Inbo
     ...attachmentRows,
   ]);
 
-  return { status: owner ? "stored" : "held", id } as InboundResult;
+  const accepted: InboundResult = { status: owner ? "stored" : "held", id };
+
+  return accepted;
 });

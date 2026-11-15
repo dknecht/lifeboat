@@ -8,17 +8,21 @@ let session = null; // { user, addresses, state }
 
 function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
+
   for (const [key, value] of Object.entries(attrs ?? {})) {
     if (value === false || value == null) continue;
+
     if (key.startsWith("on")) el.addEventListener(key.slice(2), value);
     else if (key === "class") el.className = value;
     else if (value === true) el.setAttribute(key, "");
     else el.setAttribute(key, value);
   }
+
   for (const child of children.flat()) {
     if (child == null || child === false) continue;
     el.append(child instanceof Node ? child : document.createTextNode(String(child)));
   }
+
   return el;
 }
 
@@ -28,12 +32,16 @@ async function api(path, { method = "GET", body } = {}) {
     headers: body === undefined && method === "GET" ? {} : { "content-type": "application/json" },
     body: method === "GET" ? undefined : JSON.stringify(body ?? {}),
   });
+
   const data = await res.json().catch(() => ({}));
+
   if (res.status === 401 && session) {
     session = null;
     location.hash = "#/login";
   }
+
   if (!res.ok) throw new Error(data.error || `The request failed (HTTP ${res.status}).`);
+
   return data;
 }
 
@@ -41,8 +49,10 @@ const notice = (kind, text) => h("div", { class: `notice ${kind}`, role: kind ==
 
 function formatDate(ms, long = false) {
   const d = new Date(ms);
+
   if (long) return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   const sameDay = d.toDateString() === new Date().toDateString();
+
   return sameDay
     ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
     : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -50,7 +60,9 @@ function formatDate(ms, long = false) {
 
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
+
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
@@ -63,6 +75,7 @@ function busy(button, status, action) {
     event?.preventDefault();
     button.disabled = true;
     status.replaceChildren();
+
     try {
       await action();
     } catch (err) {
@@ -80,13 +93,16 @@ const logo = () => {
   svg.setAttribute("stroke", "currentColor");
   svg.setAttribute("stroke-width", "2");
   svg.setAttribute("aria-hidden", "true");
+
   for (const d of ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z", "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "m5.6 5.6 3.6 3.6m5.6 5.6 3.6 3.6m0-12.8-3.6 3.6m-5.6 5.6-3.6 3.6"]) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
     svg.append(path);
   }
+
   return svg;
 };
+
 const brand = () => h("div", { class: "brand" }, logo(), "Lifeboat");
 
 // ── Signed-out views ─────────────────────────────────────────────────────────
@@ -97,6 +113,7 @@ function loginView() {
   const email = h("input", { type: "email", id: "email", autocomplete: "username", required: true });
   const password = h("input", { type: "password", id: "password", autocomplete: "current-password", required: true });
   const submit = h("button", { class: "primary", type: "submit" }, "Sign in");
+
   const form = h(
     "form",
     {},
@@ -104,6 +121,7 @@ function loginView() {
     h("div", { class: "field" }, h("label", { for: "password" }, "Lifeboat password"), password),
     submit,
   );
+
   form.addEventListener(
     "submit",
     busy(submit, status, async () => {
@@ -136,6 +154,7 @@ function inviteView(token) {
   const password = h("input", { type: "password", id: "new-password", autocomplete: "new-password", required: true, minlength: "12" });
   const confirm = h("input", { type: "password", id: "confirm-password", autocomplete: "new-password", required: true });
   const submit = h("button", { class: "primary", type: "submit" }, "Set password");
+
   const form = h(
     "form",
     {},
@@ -143,6 +162,7 @@ function inviteView(token) {
     h("div", { class: "field" }, h("label", { for: "confirm-password" }, "Repeat the password"), confirm),
     submit,
   );
+
   form.addEventListener(
     "submit",
     busy(submit, status, async () => {
@@ -180,6 +200,7 @@ function inviteView(token) {
 
 function shell(current, content, unread) {
   const { user, state } = session;
+
   // Following a link to the view that is already open reloads it, so "Inbox" doubles as a refresh.
   const link = (hash, label, extra) =>
     h(
@@ -188,18 +209,21 @@ function shell(current, content, unread) {
       h("span", {}, label),
       extra,
     );
+
   const signOut = h("button", {}, "Sign out");
   signOut.addEventListener("click", async () => {
     await api("/auth/logout", { method: "POST" }).catch(() => {});
     session = null;
     location.hash = "#/login";
   });
-  const banner =
-    state === "active"
-      ? h("div", { class: "banner active", role: "status" }, "Microsoft 365 email is unavailable. New mail is arriving here, and you can reply from this page.")
-      : state === "recovering"
-        ? h("div", { class: "banner recovering", role: "status" }, "Microsoft 365 is back. Mail from the outage is being copied to your mailbox; new mail arrives in Outlook.")
-        : null;
+
+  const bannerText = {
+    active: "Microsoft 365 email is unavailable. New mail is arriving here, and you can reply from this page.",
+    recovering: "Microsoft 365 is back. Mail from the outage is being copied to your mailbox; new mail arrives in Outlook.",
+  }[state];
+
+  const banner = bannerText ? h("div", { class: `banner ${state}`, role: "status" }, bannerText) : null;
+
   const parts = [
     h(
       "header",
@@ -225,11 +249,22 @@ function shell(current, content, unread) {
       h("main", {}, content),
     ),
   ];
+
   // replaceChildren would render a missing banner as the text "null".
   root.replaceChildren(...parts.filter(Boolean));
 }
 
 // ── Mail views ───────────────────────────────────────────────────────────────
+
+function emptyFolderText(folder) {
+  if (folder === "sent") return "Messages you send from Lifeboat appear here.";
+
+  if (session.state === "standby") {
+    return "Nothing here. Mail arrives in Lifeboat only while Microsoft 365 is unavailable.";
+  }
+
+  return "No mail has arrived yet.";
+}
 
 async function folderView(folder) {
   const title = folder === "sent" ? "Sent" : "Inbox";
@@ -241,6 +276,7 @@ async function folderView(folder) {
 
   const render = (m) => {
     const who = folder === "sent" ? `To: ${m.to.map((p) => p.name || p.address).join(", ")}` : m.from.name || m.from.address;
+
     return h(
       "a",
       { class: `item${m.isRead ? "" : " unread"}`, href: `#/m/${m.id}` },
@@ -258,22 +294,21 @@ async function folderView(folder) {
   async function load(cursor) {
     const data = await api(`/messages?folder=${folder}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
     unread = data.unread;
+
     if (!cursor && !data.messages.length) {
       list.replaceChildren(
         h(
           "div",
           { class: "empty" },
-          folder === "sent"
-            ? "Messages you send from Lifeboat appear here."
-            : session.state === "standby"
-              ? "Nothing here. Mail arrives in Lifeboat only while Microsoft 365 is unavailable."
-              : "No mail has arrived yet.",
+          emptyFolderText(folder),
         ),
       );
     } else {
       list.append(...data.messages.map(render));
     }
+
     more.replaceChildren();
+
     if (data.nextCursor) {
       const button = h("button", {}, "Load older messages");
       button.addEventListener("click", busy(button, status, () => load(data.nextCursor)));
@@ -295,6 +330,7 @@ function htmlFrame(html) {
     sandbox: "allow-same-origin allow-popups allow-popups-to-escape-sandbox",
     referrerpolicy: "no-referrer",
   });
+
   frame.srcdoc =
     `<!doctype html><meta charset="utf-8">` +
     `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">` +
@@ -302,8 +338,10 @@ function htmlFrame(html) {
     html;
   frame.addEventListener("load", () => {
     const doc = frame.contentDocument;
+
     if (doc) frame.style.height = `${doc.documentElement.scrollHeight + 16}px`;
   });
+
   return frame;
 }
 
@@ -311,9 +349,11 @@ async function messageView(id) {
   const { message: m } = await api(`/messages/${id}`);
   document.title = `${m.subject || "(no subject)"} · Lifeboat`;
   const back = `#/${m.folder}`;
+
   const body = m.body.html
     ? htmlFrame(m.body.html)
     : h("pre", { class: "body-text" }, m.body.text || "(This message has no text.)");
+
   const files = m.attachments.filter((a) => !a.inline || !m.body.html);
   shell(back, [
     h(
@@ -364,6 +404,7 @@ function readFileBase64(file) {
 async function composeView(replyToId) {
   document.title = "New message · Lifeboat";
   let parent = null;
+
   if (replyToId) parent = (await api(`/messages/${replyToId}`)).message;
 
   const from = h("select", { id: "from" }, session.addresses.map((a) => h("option", { value: a, selected: a === (parent?.rcptTo ?? session.user.email) }, a)));
@@ -383,6 +424,7 @@ async function composeView(replyToId) {
   }
 
   const split = (value) => value.split(/[,;\s]+/).filter(Boolean);
+
   const form = h(
     "form",
     { class: "card" },
@@ -394,13 +436,16 @@ async function composeView(replyToId) {
     h("div", { class: "field" }, h("label", { for: "files" }, "Attachments (25 MB in total)"), files),
     h("div", { class: "row" }, submit, h("a", { class: "btn", href: parent ? `#/m/${parent.id}` : "#/inbox" }, "Discard")),
   );
+
   form.addEventListener(
     "submit",
     busy(submit, status, async () => {
       const attachments = [];
+
       for (const file of files.files) {
         attachments.push({ filename: file.name, contentType: file.type || "application/octet-stream", contentBase64: await readFileBase64(file) });
       }
+
       await api("/messages", {
         method: "POST",
         body: { from: from.value, to: split(to.value), cc: split(cc.value), subject: subject.value, text: text.value, inReplyToId: parent?.id, attachments },
@@ -409,6 +454,7 @@ async function composeView(replyToId) {
     }),
   );
   shell("#/compose", [h("div", { class: "head" }, h("h1", {}, parent ? "Reply" : "New message")), status, form]);
+
   if (parent) {
     text.focus();
     text.setSelectionRange(0, 0);
@@ -421,18 +467,21 @@ async function composeView(replyToId) {
 
 async function adminView() {
   document.title = "Admin · Lifeboat";
+
   const [overview, { users }, held, { entries }] = await Promise.all([
     api("/admin/overview"),
     api("/admin/users"),
     api("/admin/held"),
     api("/admin/audit"),
   ]);
+
   session.state = overview.state;
   const status = h("div");
   const reload = () => adminView();
 
   // Failover control
   const control = h("div", { class: "row", style: "margin-top:0.8rem" });
+
   if (overview.state === "active") {
     const end = h("button", { class: "primary" }, "End outage and sync mail back");
     end.addEventListener(
@@ -452,6 +501,7 @@ async function adminView() {
       "submit",
       busy(start, status, async () => {
         const how = overview.dnsMode === "api" ? "Lifeboat will change the domain's MX records now." : "You will then need to change the MX records by hand.";
+
         if (!confirm(`Declare an outage for ${overview.domain}? ${how}`)) return;
         await api("/admin/failover/activate", { method: "POST", body: { reason: reason.value } });
         await reload();
@@ -461,6 +511,7 @@ async function adminView() {
   }
 
   const probe = overview.probe;
+
   const probeText = !probe.configured
     ? "Health probe is not configured. Set the Graph variables and a canary mailbox to enable it."
     : probe.status === "unknown"
@@ -489,6 +540,7 @@ async function adminView() {
     "click",
     busy(runSync, syncStatus, async () => {
       const r = await api("/admin/sync/run", { method: "POST", body: { retryFailed: true } });
+
       if (r.error) throw new Error(r.error);
       await reload();
     }),
@@ -496,11 +548,13 @@ async function adminView() {
 
   // Users
   const inviteOut = h("div");
+
   const showInvite = (email, link, sent) =>
     inviteOut.replaceChildren(
       notice("ok", sent ? `Invite emailed to ${email}. The link is also shown below.` : `Invite link for ${email}. Send it to them through a channel you trust; it is valid for 14 days.`),
       h("code", { class: "copy" }, link),
     );
+
   const userRows = users.map((u) => {
     const link = h("button", { class: "link" }, "New invite link");
     link.addEventListener("click", busy(link, inviteOut, async () => showInvite(u.email, (await api(`/admin/users/${u.id}/invite`, { method: "POST" })).inviteLink, false)));
@@ -509,10 +563,12 @@ async function adminView() {
       "click",
       busy(send, inviteOut, async () => {
         const r = await api(`/admin/users/${u.id}/invite`, { method: "POST", body: { send: true } });
+
         if (!r.sent) throw new Error(`The invite email could not be sent${r.sendError ? `: ${r.sendError}` : "."}`);
         showInvite(u.email, r.inviteLink, true);
       }),
     );
+
     return h(
       "tr",
       {},
@@ -528,6 +584,7 @@ async function adminView() {
   const newName = h("input", { type: "text", id: "new-name" });
   const newRole = h("select", { id: "new-role" }, h("option", { value: "user" }, "User"), h("option", { value: "admin" }, "Admin"));
   const add = h("button", { type: "submit" }, "Add user");
+
   const addForm = h(
     "form",
     { class: "row", style: "align-items:flex-end;margin-top:0.9rem" },
@@ -536,6 +593,7 @@ async function adminView() {
     h("div", { style: "flex:1;min-width:7rem" }, h("label", { for: "new-role" }, "Role"), newRole),
     add,
   );
+
   addForm.addEventListener(
     "submit",
     busy(add, inviteOut, async () => {
@@ -556,6 +614,7 @@ async function adminView() {
 
   // Held mail
   const heldStatus = h("div");
+
   const heldRows = held.messages.map((m) => {
     const who = h("input", { type: "email", "aria-label": `Assign message for ${m.rcptTo} to user`, placeholder: "user's email address", style: "min-width:12rem" });
     const assign = h("button", { type: "submit" }, "Assign");
@@ -567,6 +626,7 @@ async function adminView() {
         await reload();
       }),
     );
+
     return h("tr", {}, h("td", { class: "wrap" }, m.rcptTo), h("td", { class: "wrap" }, m.from.address), h("td", { class: "wrap" }, m.subject || "(no subject)"), h("td", {}, formatDate(m.date)), h("td", {}, form));
   });
 
@@ -611,15 +671,24 @@ async function loadSession() {
 
 async function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/");
+
   if (parts[0] === "invite" && parts[1]) return inviteView(parts[1]);
+
   if (!session) await loadSession();
+
   if (!session) return loginView();
+
   try {
     if (parts[0] === "sent") return await folderView("sent");
+
     if (parts[0] === "m" && parts[1]) return await messageView(parts[1]);
+
     if (parts[0] === "compose") return await composeView(parts[1] === "reply" ? parts[2] : null);
+
     if (parts[0] === "admin" && session.user.role === "admin") return await adminView();
+
     if (parts[0] === "login") return void (location.hash = "#/inbox");
+
     return await folderView("inbox");
   } catch (err) {
     if (!session) return loginView();
@@ -628,4 +697,5 @@ async function route() {
 }
 
 window.addEventListener("hashchange", route);
+
 route();

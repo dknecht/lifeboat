@@ -3,6 +3,7 @@ import * as Data from "effect/Data";
 // ── Infrastructure failures ──────────────────────────────────────────────────
 
 export class DbError extends Data.TaggedError("DbError")<{ readonly cause: unknown }> {}
+
 export class BlobError extends Data.TaggedError("BlobError")<{ readonly cause: unknown }> {}
 
 /** The network request itself failed: DNS, TLS, connection reset, or timeout. */
@@ -29,6 +30,11 @@ export class GraphError extends Data.TaggedError("GraphError")<{
 export class GraphNotConfigured extends Data.TaggedError("GraphNotConfigured")<{}> {
   readonly message = "Microsoft Graph is not configured.";
 }
+
+/** Sign-in was refused: the credentials are wrong, or the account is locked after repeated failures. */
+export class LoginRejected extends Data.TaggedError("LoginRejected")<{
+  readonly reason: "invalid" | "locked";
+}> {}
 
 /** A failover transition was refused or a DNS change failed. */
 export class FailoverError extends Data.TaggedError("FailoverError")<{ readonly message: string }> {}

@@ -15,7 +15,7 @@ import * as Redacted from "effect/Redacted";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { handleInbound, handleRequest, handleScheduled } from "./app";
-import { appLayer, type AppServices, type SendEmailBinding } from "./services";
+import { appLayer, type AppServices } from "./services";
 
 /** Message index, users, sessions, incidents. Pending migrations are applied on every deploy. */
 export const Database = Cloudflare.D1.Database("DB", { migrations: "./migrations" });
@@ -26,7 +26,30 @@ export const MailBucket = Cloudflare.R2.Bucket("Mail");
 /** Outbound mail through Cloudflare Email Sending. */
 const Outbound = Cloudflare.Email.SendEmail("EMAIL");
 
+/** Collects a byte stream into one array. */
+async function readAll(stream: { getReader(): ReadableStreamDefaultReader<Uint8Array> }): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+
+  for (let next = await reader.read(); !next.done; next = await reader.read()) {
+    chunks.push(next.value);
+    length += next.value.byteLength;
+  }
+
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return bytes;
+}
+
 const text = (name: string, fallback: string) => Config.String(name).pipe(Config.withDefault(fallback));
+
 const secret = (name: string) =>
   Config.option(Config.Redacted(name)).pipe(Config.map(Option.match({ onNone: () => undefined, onSome: Redacted.value })));
 
@@ -70,12 +93,15 @@ export default Cloudflare.Worker(
     /** Runs an application effect with services built from this Worker's bindings. */
     const withApp = <A, E>(effect: Effect.Effect<A, E, AppServices>) =>
       Effect.gen(function* () {
+        const sender = yield* email.raw;
+
         const layer = appLayer({
           db: yield* db.raw,
           bucket: yield* bucket.raw,
-          email: (yield* email.raw) as unknown as SendEmailBinding,
+          email: { send: (message) => sender.send(message) },
           vars,
         });
+
         return yield* Effect.provide(effect, layer);
       });
 
@@ -97,10 +123,12 @@ export default Cloudflare.Worker(
             to: message.to,
             headers: message.headers,
             size: message.bodySize,
-            readRaw: Effect.promise(async () => new Uint8Array(await new Response(message.body as never).arrayBuffer())),
+            readRaw: Effect.promise(() => readAll(message.body)),
           }),
         );
+
         yield* Effect.logInfo(`Inbound mail for ${message.to}: ${result.status}`);
+
         if (result.status === "rejected") yield* message.setReject(result.reason);
         // A storage failure is deliberately left to fail the event: the platform then answers with a
         // temporary SMTP error and the sending server retries, so mail is never accepted and lost.
@@ -111,6 +139,7 @@ export default Cloudflare.Worker(
       fetch: Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const web = yield* HttpServerRequest.toWeb(request);
+
         return HttpServerResponse.fromWeb(yield* withApp(handleRequest(web)));
       }).pipe(
         // Only reached when the incoming request itself cannot be read.

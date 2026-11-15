@@ -1,5 +1,8 @@
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+
 export interface OutgoingEmail {
-  from: string | { email: string; name?: string };
+  from: string | { email: string; name: string };
   to: string[];
   cc?: string[];
   subject: string;
@@ -10,15 +13,25 @@ export interface OutgoingEmail {
     content: string;
     filename: string;
     type: string;
-    disposition: "attachment" | "inline";
+    disposition: "attachment";
   }[];
 }
 
 export type FailoverState = "standby" | "active" | "recovering";
 
-export interface Person {
-  address: string;
-  name: string;
+export const Person = Schema.Struct({ address: Schema.String, name: Schema.String });
+
+export type Person = typeof Person.Type;
+
+const decodePeopleOption = Schema.decodeUnknownOption(Schema.Array(Person));
+
+/** Decodes a stored JSON list of people. A malformed column yields an empty list. */
+export function decodePeople(json: string): ReadonlyArray<Person> {
+  try {
+    return Option.getOrElse(decodePeopleOption(JSON.parse(json)), () => []);
+  } catch {
+    return [];
+  }
 }
 
 export interface UserRow {

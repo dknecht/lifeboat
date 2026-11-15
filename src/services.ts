@@ -8,7 +8,7 @@ import { intVar } from "./util";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
-export interface AppConfigShape {
+export interface Configuration {
   readonly workerName: string;
   readonly mailDomain: string;
   readonly appUrl: string;
@@ -29,30 +29,50 @@ export interface AppConfigShape {
   readonly cloudflare: { readonly zoneId: string; readonly apiToken: Redacted.Redacted<string> } | null;
 }
 
-export class AppConfig extends Context.Service<AppConfig, AppConfigShape>()("lifeboat/AppConfig") {}
+export class AppConfig extends Context.Service<AppConfig, Configuration>()("lifeboat/AppConfig") {}
+
+/** The Worker's plain environment values, as bound by src/worker.ts. Every value is optional text. */
+export interface EnvironmentValues {
+  readonly WORKER_NAME?: string | undefined;
+  readonly MAIL_DOMAIN?: string | undefined;
+  readonly APP_URL?: string | undefined;
+  readonly DNS_MODE?: string | undefined;
+  readonly UNKNOWN_RECIPIENT?: string | undefined;
+  readonly AUTO_FAILOVER?: string | undefined;
+  readonly PROBE_THRESHOLD?: string | undefined;
+  readonly RETENTION_DAYS?: string | undefined;
+  readonly GRAPH_TENANT_ID?: string | undefined;
+  readonly GRAPH_CLIENT_ID?: string | undefined;
+  readonly GRAPH_CANARY_MAILBOX?: string | undefined;
+  readonly CF_ZONE_ID?: string | undefined;
+  readonly ADMIN_TOKEN?: string | undefined;
+  readonly GRAPH_CLIENT_SECRET?: string | undefined;
+  readonly CF_API_TOKEN?: string | undefined;
+}
+
+const secretOf = (value: string | undefined) => (value ? Redacted.make(value) : null);
 
 /** Builds the configuration from the Worker's plain environment values. */
-export function configFromEnv(env: Record<string, string | undefined>): AppConfigShape {
-  const get = (key: string) => env[key] ?? "";
-  const secret = (key: string) => (env[key] ? Redacted.make(env[key]!) : null);
-  const graphSecret = secret("GRAPH_CLIENT_SECRET");
-  const cfToken = secret("CF_API_TOKEN");
+export function configFromEnv(env: EnvironmentValues): Configuration {
+  const graphSecret = secretOf(env.GRAPH_CLIENT_SECRET);
+  const cfToken = secretOf(env.CF_API_TOKEN);
+
   return {
-    workerName: get("WORKER_NAME") || "lifeboat",
-    mailDomain: get("MAIL_DOMAIN").toLowerCase(),
-    appUrl: get("APP_URL").replace(/\/$/, ""),
-    dnsMode: get("DNS_MODE") === "api" ? "api" : "manual",
-    unknownRecipient: get("UNKNOWN_RECIPIENT") === "reject" ? "reject" : "hold",
-    autoFailover: get("AUTO_FAILOVER") === "true",
+    workerName: env.WORKER_NAME || "lifeboat",
+    mailDomain: (env.MAIL_DOMAIN ?? "").toLowerCase(),
+    appUrl: (env.APP_URL ?? "").replace(/\/$/, ""),
+    dnsMode: env.DNS_MODE === "api" ? "api" : "manual",
+    unknownRecipient: env.UNKNOWN_RECIPIENT === "reject" ? "reject" : "hold",
+    autoFailover: env.AUTO_FAILOVER === "true",
     probeThreshold: intVar(env.PROBE_THRESHOLD, 3),
     retentionDays: intVar(env.RETENTION_DAYS, 30),
-    adminToken: secret("ADMIN_TOKEN"),
+    adminToken: secretOf(env.ADMIN_TOKEN),
     graph:
-      get("GRAPH_TENANT_ID") && get("GRAPH_CLIENT_ID") && graphSecret
-        ? { tenantId: get("GRAPH_TENANT_ID"), clientId: get("GRAPH_CLIENT_ID"), clientSecret: graphSecret }
+      env.GRAPH_TENANT_ID && env.GRAPH_CLIENT_ID && graphSecret
+        ? { tenantId: env.GRAPH_TENANT_ID, clientId: env.GRAPH_CLIENT_ID, clientSecret: graphSecret }
         : null,
-    canaryMailbox: get("GRAPH_CANARY_MAILBOX"),
-    cloudflare: get("CF_ZONE_ID") && cfToken ? { zoneId: get("CF_ZONE_ID"), apiToken: cfToken } : null,
+    canaryMailbox: env.GRAPH_CANARY_MAILBOX ?? "",
+    cloudflare: env.CF_ZONE_ID && cfToken ? { zoneId: env.CF_ZONE_ID, apiToken: cfToken } : null,
   };
 }
 
@@ -63,9 +83,10 @@ export interface Statement {
   readonly sql: string;
   readonly binds: ReadonlyArray<unknown>;
 }
+
 export const sql = (text: string, ...binds: unknown[]): Statement => ({ sql: text, binds });
 
-export interface DbShape {
+export interface SqlDatabase {
   readonly first: <T>(statement: Statement) => Effect.Effect<T | null, DbError>;
   readonly all: <T>(statement: Statement) => Effect.Effect<T[], DbError>;
   /** Runs a mutation and returns the number of rows it changed. */
@@ -74,12 +95,14 @@ export interface DbShape {
   readonly batch: (statements: ReadonlyArray<Statement>) => Effect.Effect<void, DbError>;
 }
 
-export class Db extends Context.Service<Db, DbShape>()("lifeboat/Db") {}
+export class Db extends Context.Service<Db, SqlDatabase>()("lifeboat/Db") {}
 
-export function makeDb(d1: D1Database): DbShape {
+export function makeDb(d1: D1Database): SqlDatabase {
   const prepare = (s: Statement) => d1.prepare(s.sql).bind(...s.binds);
+
   const attempt = <A>(run: () => Promise<A>) =>
     Effect.tryPromise({ try: run, catch: (cause) => new DbError({ cause }) });
+
   return {
     first: <T>(s: Statement) => attempt(() => prepare(s).first<T>()),
     all: <T>(s: Statement) => attempt(async () => (await prepare(s).all<T>()).results),
@@ -91,7 +114,7 @@ export function makeDb(d1: D1Database): DbShape {
 
 // ── Object storage (R2) ──────────────────────────────────────────────────────
 
-export interface BlobsShape {
+export interface BlobStore {
   readonly put: (
     key: string,
     value: Uint8Array | string,
@@ -106,11 +129,12 @@ export interface BlobsShape {
   readonly delete: (keys: string[]) => Effect.Effect<void, BlobError>;
 }
 
-export class Blobs extends Context.Service<Blobs, BlobsShape>()("lifeboat/Blobs") {}
+export class Blobs extends Context.Service<Blobs, BlobStore>()("lifeboat/Blobs") {}
 
-export function makeBlobs(bucket: R2Bucket): BlobsShape {
+export function makeBlobs(bucket: R2Bucket): BlobStore {
   const attempt = <A>(run: () => Promise<A>) =>
     Effect.tryPromise({ try: run, catch: (cause) => new BlobError({ cause }) });
+
   return {
     put: (key, value, contentType, metadata) =>
       Effect.asVoid(
@@ -119,11 +143,13 @@ export function makeBlobs(bucket: R2Bucket): BlobsShape {
     getBytes: (key) =>
       attempt(async () => {
         const object = await bucket.get(key);
+
         return object ? new Uint8Array(await object.arrayBuffer()) : null;
       }),
     getJson: <T>(key: string) =>
       attempt(async () => {
         const object = await bucket.get(key);
+
         return object ? await object.json<T>() : null;
       }),
     getStream: (key) => attempt(async () => (await bucket.get(key))?.body ?? null),
@@ -134,23 +160,25 @@ export function makeBlobs(bucket: R2Bucket): BlobsShape {
 
 // ── Outbound mail (Cloudflare Email Sending) ─────────────────────────────────
 
-export interface MailerShape {
+export interface MailSender {
   readonly send: (message: OutgoingEmail) => Effect.Effect<{ messageId?: string }, SendFailed>;
 }
 
-export class Mailer extends Context.Service<Mailer, MailerShape>()("lifeboat/Mailer") {}
+export class Mailer extends Context.Service<Mailer, MailSender>()("lifeboat/Mailer") {}
 
 /** The structured send method of the `send_email` binding. */
 export interface SendEmailBinding {
   send(message: OutgoingEmail): Promise<{ messageId?: string }>;
 }
 
-export function makeMailer(binding: SendEmailBinding): MailerShape {
+export function makeMailer(binding: SendEmailBinding): MailSender {
   return {
     send: (message) =>
       Effect.tryPromise({
         try: () => binding.send(message),
-        catch: (cause) => new SendFailed({ code: (cause as { code?: string })?.code, cause }),
+        // Cloudflare Email Sending attaches a code such as E_SENDER_NOT_VERIFIED to its errors.
+        catch: (cause) =>
+          new SendFailed({ code: cause instanceof Error && "code" in cause ? String(cause.code) : undefined, cause }),
       }),
   };
 }
@@ -164,7 +192,7 @@ export interface RawBindings {
   readonly db: D1Database;
   readonly bucket: R2Bucket;
   readonly email: SendEmailBinding;
-  readonly vars: Record<string, string | undefined>;
+  readonly vars: EnvironmentValues;
 }
 
 export const appLayer = (raw: RawBindings): Layer.Layer<AppServices> =>

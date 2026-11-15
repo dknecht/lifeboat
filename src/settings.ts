@@ -6,6 +6,7 @@ import { now } from "./util";
 export const getSetting = Effect.fn("getSetting")(function* (key: string) {
   const db = yield* Db;
   const row = yield* db.first<{ value: string }>(sql("SELECT value FROM settings WHERE key = ?", key));
+
   return row?.value ?? null;
 });
 
@@ -27,14 +28,19 @@ export const deleteSetting = Effect.fn("deleteSetting")(function* (key: string) 
 
 export const getState = Effect.gen(function* () {
   const value = yield* getSetting("state");
-  return (value === "active" || value === "recovering" ? value : "standby") as FailoverState;
+  const known: ReadonlyArray<FailoverState> = ["active", "recovering"];
+
+  // Anything else, including a missing row, means the service has never left standby.
+  return known.find((state) => state === value) ?? "standby";
 });
 
 export const getOpenIncidentId = Effect.gen(function* () {
   const db = yield* Db;
+
   const row = yield* db.first<{ id: string }>(
     sql("SELECT id FROM incidents WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1"),
   );
+
   return row?.id ?? null;
 });
 

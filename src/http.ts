@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { NetworkError } from "./errors";
 
 /**
@@ -13,9 +14,12 @@ export const request = (url: string, init: RequestInit = {}): Effect.Effect<Resp
     catch: (cause) => new NetworkError({ url, cause }),
   });
 
-/** Reads a response body as JSON, yielding null when it is empty or malformed. */
-export const readJson = <T>(response: Response): Effect.Effect<T | null> =>
-  Effect.promise(() => response.json().then((v) => v as T, () => null));
+/** Reads a response body as JSON and decodes it, yielding null when it is empty or does not match. */
+export const readJson = <S extends Schema.Top>(response: Response, schema: S) =>
+  Effect.tryPromise(() => response.json()).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(schema)),
+    Effect.orElseSucceed(() => null),
+  );
 
 export const readText = (response: Response): Effect.Effect<string> =>
   Effect.promise(() => response.text().catch(() => ""));

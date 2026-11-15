@@ -262,6 +262,8 @@ lifeboat/
 │   ├── health.ts       probe
 │   └── settings.ts, http.ts, types.ts, util.ts
 ├── public/             index.html, app.js, style.css
+├── site/index.html     landing page
+├── tools/oxlint/       vendored anti-slop lint rules
 └── test/               Vitest suites running in the Workers runtime
 ```
 
