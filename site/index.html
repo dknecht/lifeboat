@@ -235,15 +235,16 @@ footer .wrap { display: flex; gap: 1rem 2rem; flex-wrap: wrap; justify-content: 
       <div>
         <h3>For the people who need their email</h3>
         <ul class="facts" style="margin-top:1.1rem">
-          <li><h3>A sign-in that works when Entra does not</h3><p>Each person sets a Lifeboat password in advance, through an invite sent while everything is healthy.</p></li>
+          <li><h3>A sign-in that works when Entra does not</h3><p>Each person sets a Lifeboat password in advance, or signs in through Cloudflare Access with an identity provider that is not Microsoft.</p></li>
           <li><h3>Replies from their own address</h3><p>Outbound mail goes through Cloudflare Email Sending with DKIM aligned to your domain, and threads correctly.</p></li>
+          <li><h3>An inbox that feels familiar</h3><p>Conversations, search, attachments, and a layout that works on a phone.</p></li>
           <li><h3>Nothing to tidy up afterwards</h3><p>Mail from the outage appears in Outlook as if it had arrived there.</p></li>
         </ul>
       </div>
       <div>
         <h3>For the admin on call</h3>
         <ul class="facts" style="margin-top:1.1rem">
-          <li><h3>One console for the whole incident</h3><p>Declare and end the outage, watch sync progress, and read an audit log of every action.</p></li>
+          <li><h3>One console for the whole incident</h3><p>Declare and end the outage, watch sync progress, and read an audit log of every action. It can sit behind Cloudflare Access.</p></li>
           <li><h3>Held mail instead of bounces</h3><p>Messages to addresses Lifeboat does not recognise wait for you to assign them.</p></li>
           <li><h3>Your account, your data</h3><p>One Worker, one D1 database, one R2 bucket. No third party holds your mail.</p></li>
         </ul>
@@ -287,8 +288,8 @@ footer .wrap { display: flex; gap: 1rem 2rem; flex-wrap: wrap; justify-content: 
     <ul class="status-list">
       <li><span class="tag ok">Works</span><span>Receiving, storing, and reading mail, including attachments and aliases.</span></li>
       <li><span class="tag todo">Unproven</span><span>Sync-back into a real tenant. It uses a Graph technique Microsoft does not document.</span></li>
-      <li><span class="tag ok">Works</span><span>Enrolment, sign-in, lockout, and the admin console.</span></li>
-      <li><span class="tag todo">Unproven</span><span>Switching MX through the Cloudflare API. The manual steps are the default.</span></li>
+      <li><span class="tag ok">Works</span><span>Enrolment, sign-in, lockout, conversations, search, and the admin console.</span></li>
+      <li><span class="tag todo">Unproven</span><span>Switching MX through the Cloudflare API, and sign-in through a real Access application.</span></li>
       <li><span class="tag ok">Works</span><span>Sending and replying with correct threading, in local development.</span></li>
       <li><span class="tag todo">By design</span><span>Users see only mail that arrives after the switch. Earlier mail stays with Microsoft.</span></li>
     </ul>
@@ -327,7 +328,7 @@ npm run deploy</pre>
 
 <footer>
   <div class="wrap">
-    <span>Lifeboat. Built on Cloudflare Workers, D1, R2, and Email Service, with Effect and Alchemy.</span>
+    <span>Lifeboat. Built on Cloudflare Workers, D1, R2, Email Service, and Kumo, with Effect and Alchemy.</span>
     <span>MIT licence</span>
   </div>
 </footer>
