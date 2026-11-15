@@ -1,9 +1,9 @@
 export interface Env {
   DB: D1Database;
   MAIL: R2Bucket;
-  ASSETS: Fetcher;
   EMAIL: Mailer;
 
+  WORKER_NAME: string;
   MAIL_DOMAIN: string;
   APP_URL: string;
   DNS_MODE: string;

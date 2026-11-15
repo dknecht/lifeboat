@@ -4,7 +4,6 @@ import type { Env, FailoverState } from "./types";
 import { newId, now } from "./util";
 
 const CF_API = "https://api.cloudflare.com/client/v4";
-const WORKER_NAME = "lifeboat";
 
 export class FailoverError extends Error {}
 
@@ -69,7 +68,7 @@ async function pointMxAtCloudflare(env: Env): Promise<void> {
       enabled: true,
       name: "Lifeboat catch-all",
       matchers: [{ type: "all" }],
-      actions: [{ type: "worker", value: [WORKER_NAME] }],
+      actions: [{ type: "worker", value: [env.WORKER_NAME] }],
     }),
   });
 }
@@ -98,7 +97,7 @@ export function manualInstructions(env: Env, direction: "activate" | "deactivate
         `In the Cloudflare dashboard, open the ${d} zone and go to Email > Email Routing.`,
         `Note the current MX record for ${d} (the Microsoft 365 record ending in .mail.protection.outlook.com), then delete it.`,
         "Enable Email Routing and let it add Cloudflare's MX records.",
-        `Set the catch-all rule to "Send to a Worker" and choose "${WORKER_NAME}".`,
+        `Set the catch-all rule to "Send to a Worker" and choose "${env.WORKER_NAME}".`,
         "Send a test message from an outside account and confirm that it appears in Lifeboat.",
       ]
     : [

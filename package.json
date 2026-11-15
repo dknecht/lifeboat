@@ -6,10 +6,10 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:migrate:local": "wrangler d1 migrations apply lifeboat --local",
-    "db:migrate": "wrangler d1 migrations apply lifeboat --remote",
+    "dev": "LIFEBOAT_LOCAL_STATE=1 alchemy dev",
+    "plan": "alchemy plan --stage prod",
+    "deploy": "alchemy deploy --stage prod",
+    "destroy": "alchemy destroy --stage prod",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -18,10 +18,13 @@
     "postal-mime": "^4.2.1"
   },
   "devDependencies": {
+    "@alchemy.run/cloudflare": "^2.0.0-beta.87",
     "@cloudflare/vitest-plugin": "^1.8.2",
     "@cloudflare/workers-types": "^5.20261115.1",
+    "@effect/platform-node": "^4.1.4",
+    "alchemy": "^2.0.0-beta.87",
+    "effect": "^4.1.4",
     "typescript": "^7.0.2",
-    "vitest": "^5.1.0",
-    "wrangler": "^4.162.0"
+    "vitest": "^5.1.0"
   }
 }

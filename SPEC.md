@@ -15,7 +15,7 @@ Status: v0.1 prototype. Sections marked **Roadmap** are designed but not built.
 1. **Failover capture.** During a declared outage the domain's MX points at Cloudflare. All inbound mail is stored durably and is readable within seconds.
 2. **Emergency webmail.** Users sign in with a credential that does not depend on Microsoft, read inbound mail, and send and reply as their real address with DMARC alignment.
 3. **Sync-back.** After recovery, mail received during the outage lands in each user's Exchange Online Inbox, and mail sent from Lifeboat lands in Sent Items.
-4. **Self-deploy.** One Cloudflare account, one Worker, one `wrangler deploy`. No servers, no third-party services.
+4. **Self-deploy.** One Cloudflare account, one Worker, one `alchemy deploy`. No servers, no third-party services.
 
 ### Non-goals for v1
 
@@ -71,6 +71,7 @@ These were verified against Cloudflare and Microsoft documentation in November 2
 |---|---|
 | Workers | Single Worker with `fetch`, `email`, and `scheduled` handlers. |
 | Workers Static Assets | The webmail and admin single-page app. No build step. |
+| Alchemy | Infrastructure as code. `alchemy.run.ts` declares the database, bucket, Worker, bindings, secrets, and cron trigger; `alchemy dev` runs the same stack locally. |
 | D1 | Users, addresses, sessions, message index, incidents, audit log, settings. |
 | R2 | Raw MIME (`raw/<id>.eml`), parsed bodies (`body/<id>.json`), attachments (`att/<id>/<n>`). |
 | Email Routing | Inbound mail to the `email` handler through a catch-all rule. |
@@ -241,7 +242,7 @@ All routes are under `/api`. Bodies are JSON.
 ```
 lifeboat/
 ├── SPEC.md, README.md
-├── wrangler.jsonc
+├── alchemy.run.ts      infrastructure: D1, R2, Worker, bindings, secrets, cron
 ├── migrations/0001_init.sql
 ├── src/
 │   ├── index.ts        fetch, email, scheduled entry points
@@ -264,6 +265,7 @@ lifeboat/
 
 | Item | Notes |
 |---|---|
+| **Declarative MX switch** | Model the Microsoft MX record, Email Routing, and the catch-all rule as Alchemy resources, so that an outage can be declared with a deploy as well as from the admin console. Needs care over the order in which records are removed and routing is enabled. |
 | **Always-inline mode** | MX on Cloudflare permanently. Every message is stored in a rolling window and forwarded to Microsoft 365, so users have recent history the moment an outage starts and no MX flip is needed. Requires a forwarding path that preserves sender authentication (a Microsoft inbound connector). |
 | **Journaling mode** | MX stays on Microsoft; a journal rule copies mail to a Lifeboat address for history. Combined with the MX flip for new mail. |
 | **Passkeys and a second identity provider** | WebAuthn enrollment, and OIDC sign-in through a non-Microsoft provider. Magic links to a personal address as a fallback. |
