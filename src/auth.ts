@@ -61,6 +61,24 @@ export const getUserById = Effect.fn("getUserById")(function* (id: string) {
   return yield* db.first<UserRow>(sql("SELECT * FROM users WHERE id = ?", id));
 });
 
+/** Finds the user who owns an address, whether it is their primary address or an alias. */
+export const getUserByAddress = Effect.fn("getUserByAddress")(function* (address: string) {
+  const db = yield* Db;
+
+  return yield* db.first<UserRow>(
+    sql(
+      "SELECT u.* FROM addresses a JOIN users u ON u.id = a.user_id WHERE a.address = ? AND u.disabled = 0",
+      normalizeAddress(address),
+    ),
+  );
+});
+
+export const setRole = Effect.fn("setRole")(function* (userId: string, role: UserRow["role"]) {
+  const db = yield* Db;
+
+  yield* db.run(sql("UPDATE users SET role = ? WHERE id = ?", role, userId));
+});
+
 export interface NewUser {
   email: string;
   displayName?: string;

@@ -10,6 +10,17 @@ import { intVar } from "./util";
 
 export interface Configuration {
   readonly workerName: string;
+  /**
+   * How people sign in. "local": Lifeboat passwords. "access": Cloudflare Access only.
+   * "both": Lifeboat passwords for mail, with the admin console requiring Access.
+   */
+  readonly authMode: "local" | "access" | "both";
+  /** Null unless the Access team domain and application audience are both set. */
+  readonly access: { readonly teamDomain: string; readonly audience: string } | null;
+  /** People who are administrators whenever they arrive through Access. */
+  readonly accessAdminEmails: ReadonlyArray<string>;
+  /** Client IDs of Access service tokens that may call the admin API. */
+  readonly accessAdminServiceTokens: ReadonlyArray<string>;
   readonly mailDomain: string;
   readonly appUrl: string;
   readonly dnsMode: "manual" | "api";
@@ -34,6 +45,11 @@ export class AppConfig extends Context.Service<AppConfig, Configuration>()("life
 /** The Worker's plain environment values, as bound by src/worker.ts. Every value is optional text. */
 export interface EnvironmentValues {
   readonly WORKER_NAME?: string | undefined;
+  readonly AUTH_MODE?: string | undefined;
+  readonly ACCESS_TEAM_DOMAIN?: string | undefined;
+  readonly ACCESS_AUD?: string | undefined;
+  readonly ACCESS_ADMIN_EMAILS?: string | undefined;
+  readonly ACCESS_ADMIN_SERVICE_TOKENS?: string | undefined;
   readonly MAIL_DOMAIN?: string | undefined;
   readonly APP_URL?: string | undefined;
   readonly DNS_MODE?: string | undefined;
@@ -50,6 +66,14 @@ export interface EnvironmentValues {
   readonly CF_API_TOKEN?: string | undefined;
 }
 
+const listOf = (value: string | undefined) =>
+  (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+const AUTH_MODES: ReadonlyArray<Configuration["authMode"]> = ["access", "both"];
+
 const secretOf = (value: string | undefined) => (value ? Redacted.make(value) : null);
 
 /** Builds the configuration from the Worker's plain environment values. */
@@ -59,6 +83,13 @@ export function configFromEnv(env: EnvironmentValues): Configuration {
 
   return {
     workerName: env.WORKER_NAME || "lifeboat",
+    authMode: AUTH_MODES.find((mode) => mode === env.AUTH_MODE) ?? "local",
+    access:
+      env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD
+        ? { teamDomain: env.ACCESS_TEAM_DOMAIN.replace(/^https?:\/\//, "").replace(/\/$/, ""), audience: env.ACCESS_AUD }
+        : null,
+    accessAdminEmails: listOf(env.ACCESS_ADMIN_EMAILS).map((email) => email.toLowerCase()),
+    accessAdminServiceTokens: listOf(env.ACCESS_ADMIN_SERVICE_TOKENS),
     mailDomain: (env.MAIL_DOMAIN ?? "").toLowerCase(),
     appUrl: (env.APP_URL ?? "").replace(/\/$/, ""),
     dnsMode: env.DNS_MODE === "api" ? "api" : "manual",

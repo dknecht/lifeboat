@@ -3,7 +3,9 @@ import { Input } from "@cloudflare/kumo/components/input";
 import { Surface } from "@cloudflare/kumo/components/surface";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { messageOf } from "../api/client";
-import { useAcceptInvite, useLogin } from "../api/queries";
+import { ShieldCheckIcon } from "@phosphor-icons/react";
+import { accessLoginHref, useAcceptInvite, useLogin } from "../api/queries";
+import type { AuthMode } from "../api/schemas";
 import { Brand, Notice, Stencil } from "../components/ui";
 import { hrefFor, navigate, useTitle } from "../lib/router";
 
@@ -29,7 +31,21 @@ function AuthCard({ title, lead, children }: { title: string; lead: string; chil
   );
 }
 
-export function LoginPage() {
+const accessLink = "inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium no-underline";
+
+/** Shown instead of the password form when Cloudflare Access is the only way to sign in. */
+export function AccessSignInPage() {
+  return (
+    <AuthCard title="All hands, sign in" lead="This Lifeboat uses Cloudflare Access. Sign in with your organisation's identity provider.">
+      <a href={accessLoginHref("inbox")} className={`${accessLink} bg-kumo-brand text-white`}>
+        <ShieldCheckIcon aria-hidden="true" />
+        Continue with Cloudflare Access
+      </a>
+    </AuthCard>
+  );
+}
+
+export function LoginPage({ authMode }: { authMode: AuthMode }) {
   const login = useLogin();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -49,6 +65,15 @@ export function LoginPage() {
           Sign in
         </Button>
       </form>
+      {authMode === "both" && (
+        <p className="mt-5 border-t border-kumo-line pt-4 text-sm text-kumo-subtle">
+          Administrators open the console through{" "}
+          <a href={accessLoginHref("admin")} className="text-kumo-link">
+            Cloudflare Access
+          </a>
+          .
+        </p>
+      )}
     </AuthCard>
   );
 }

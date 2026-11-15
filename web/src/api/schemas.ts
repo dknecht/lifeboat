@@ -7,6 +7,13 @@ export const FailoverState = Schema.Literals(["standby", "active", "recovering"]
 
 export type FailoverState = typeof FailoverState.Type;
 
+/** How people sign in: Lifeboat passwords, Cloudflare Access, or passwords with Access for the admin console. */
+export const AuthMode = Schema.Literals(["local", "access", "both"]);
+
+export type AuthMode = typeof AuthMode.Type;
+
+export const Status = Schema.Struct({ state: FailoverState, domain: Schema.String, authMode: AuthMode });
+
 export const Person = Schema.Struct({ address: Schema.String, name: Schema.String });
 
 export type Person = typeof Person.Type;
@@ -24,6 +31,9 @@ export const Session = Schema.Struct({
   user: User,
   addresses: Schema.Array(Schema.String),
   state: FailoverState,
+  authMode: AuthMode,
+  /** Whether this visit is backed by a Lifeboat session or by Cloudflare Access. */
+  via: Schema.Literals(["session", "access"]),
 });
 
 export type Session = typeof Session.Type;
@@ -141,7 +151,8 @@ export type AuditEntry = typeof AuditEntry.Type;
 
 export const AuditLog = Schema.Struct({ entries: Schema.Array(AuditEntry) });
 
-export const UserCreated = Schema.Struct({ user: User, inviteLink: Schema.String });
+/** `inviteLink` is null when Access is the only way to sign in, since there is no password to set. */
+export const UserCreated = Schema.Struct({ user: User, inviteLink: Schema.NullOr(Schema.String) });
 
 export const Invite = Schema.Struct({
   inviteLink: Schema.String,
@@ -161,4 +172,4 @@ export const SyncRun = Schema.Struct({
   state: FailoverState,
 });
 
-export const Failure = Schema.Struct({ error: Schema.String });
+export const Failure = Schema.Struct({ error: Schema.String, code: Schema.optional(Schema.String) });

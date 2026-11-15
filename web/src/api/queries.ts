@@ -2,6 +2,15 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { ApiFailure, get, post } from "./client";
 import * as S from "./schemas";
 
+/** Public facts about this deployment, including how people are expected to sign in. */
+export const useStatus = () => useQuery({ queryKey: ["status"], queryFn: () => get("/status", S.Status), staleTime: 60_000 });
+
+/** Where to send the browser so that Cloudflare Access signs the person in and returns them to `next`. */
+export const accessLoginHref = (next: "admin" | "inbox") => `/api/admin/access-login?next=${next}`;
+
+/** Cloudflare's own sign-out address for Access, which ends the Access session for this site. */
+export const ACCESS_LOGOUT_HREF = "/cdn-cgi/access/logout";
+
 /** The signed-in session, or null when nobody is signed in. */
 export function useSession() {
   return useQuery({

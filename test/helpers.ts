@@ -117,7 +117,7 @@ export async function deliverOk(from: string, to: string, raw: string): Promise<
 
 export function call(
   path: string,
-  init: { method?: string; headers?: Record<string, string>; body?: object; rawBody?: string } = {},
+  init: { method?: string; headers?: Record<string, string>; body?: object; rawBody?: string; vars?: EnvironmentValues } = {},
 ): Promise<Response> {
   const write = Boolean(init.method && init.method !== "GET");
 
@@ -132,7 +132,7 @@ export function call(
     body: write ? (init.rawBody ?? JSON.stringify(init.body ?? {})) : undefined,
   });
 
-  return run(handleRequest(request));
+  return run(handleRequest(request), init.vars);
 }
 
 /** Creates an enrolled user and returns a session cookie for them. */

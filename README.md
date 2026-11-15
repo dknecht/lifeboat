@@ -85,6 +85,36 @@ Do all of this while Microsoft 365 is healthy.
 
 Alchemy keeps deployment state in your Cloudflare account, so any machine or CI job with credentials can update the stack. `npm run destroy` removes everything, including stored mail.
 
+## Sign-in with Cloudflare Access
+
+`AUTH_MODE` chooses how people sign in.
+
+| Mode | Mail | Admin console | Use it when |
+|---|---|---|---|
+| `local` (default) | Lifeboat password | Lifeboat password | You have no identity provider other than Microsoft. |
+| `both` | Lifeboat password | Cloudflare Access | Admins can be given a non-Microsoft provider; everyone else keeps a password as the fallback. |
+| `access` | Cloudflare Access | Cloudflare Access | The whole organisation has a non-Microsoft provider. |
+
+**Access must be able to sign people in without Microsoft.** If Entra ID is the only identity provider configured in Access, an Entra outage locks people out of Lifeboat. Access's one-time PIN does not help either: the code is emailed to the work address, which is the mailbox the person is trying to reach.
+
+To set it up:
+
+1. In Zero Trust, create a self-hosted Access application.
+   - For `access`, cover the whole Lifeboat hostname.
+   - For `both`, cover only the path `/api/admin` on that hostname.
+2. Give it a policy and at least one login method that does not depend on Microsoft.
+3. Set `ACCESS_TEAM_DOMAIN` (for example `yourteam.cloudflareaccess.com`) and `ACCESS_AUD` (the application's audience tag).
+4. List the administrators in `ACCESS_ADMIN_EMAILS`. They are created, or promoted, the first time they arrive through Access.
+5. For an external monitor, create an Access service token, allow it in the policy, and list its client ID in `ACCESS_ADMIN_SERVICE_TOKENS`.
+
+How it behaves:
+
+- The Worker verifies the token Access attaches to each request against your team's published keys, and checks the audience, issuer, and expiry. In `local` mode the header is ignored.
+- Someone Access lets in who has no Lifeboat account gets one automatically if their address is in `MAIL_DOMAIN`. Anyone else is refused unless they are a listed administrator.
+- In `access` mode there are no Lifeboat passwords, sessions, or invites.
+- In `both` mode an administrator signs in with a password to read mail, then passes through Access to open the console.
+- `ADMIN_TOKEN` keeps working in every mode as a break-glass credential. With Access in front of the admin path, a request also needs a service token to get past Access.
+
 ### Limiting Graph access
 
 `Mail.ReadWrite` as an application permission covers every mailbox in the tenant. Restrict it to the mailboxes Lifeboat serves with [RBAC for Applications in Exchange Online](https://learn.microsoft.com/exchange/permissions-exo/application-rbac).
@@ -100,6 +130,10 @@ Alchemy keeps deployment state in your Cloudflare account, so any machine or CI 
 | `AUTO_FAILOVER` | `false` | Declare an outage automatically after `PROBE_THRESHOLD` failed probes. |
 | `PROBE_THRESHOLD` | `3` | Consecutive probe results needed to change health status. |
 | `RETENTION_DAYS` | `30` | Days to keep a message after it has been synced. Unsynced mail is never deleted. |
+| `AUTH_MODE` | `local` | `local`, `both`, or `access`. See [Sign-in with Cloudflare Access](#sign-in-with-cloudflare-access). |
+| `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` | | Your Zero Trust team domain and the Access application's audience tag. |
+| `ACCESS_ADMIN_EMAILS` | | Comma-separated administrators, when they sign in through Access. |
+| `ACCESS_ADMIN_SERVICE_TOKENS` | | Comma-separated client IDs of Access service tokens allowed to call the admin API. |
 | `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID` | | Entra app registration. |
 | `GRAPH_CANARY_MAILBOX` | | Mailbox the health probe reads. |
 
@@ -121,6 +155,7 @@ Verified locally (automated tests in the Workers runtime, plus a browser run aga
 
 - Inbound capture, aliases, held mail, attachment storage and download, per-user isolation.
 - Enrollment, sign-in, lockout, sessions, admin authorization.
+- Cloudflare Access token verification (signature, audience, issuer, expiry), automatic account creation, and the three sign-in modes.
 - Sending with threading headers through the local Email Sending binding.
 - `npm run dev` through Alchemy's Effect runtime: migrations, bindings, secrets, static assets, inbound mail, sending, and the cron handler.
 - The failover state machine, health probe counters, retention sweep.
@@ -132,6 +167,7 @@ Not yet verified against live services:
 
 - **`npm run deploy`.** The stack type-checks and runs locally, but it has not been deployed to a Cloudflare account.
 - **Sync-back against a real tenant.** Creating a message as a delivered (non-draft) item relies on setting the `PidTagMessageFlags` extended property at creation. This is widely used but not documented by Microsoft.
+- **Cloudflare Access sign-in against a real Access application.** Token verification is tested with locally generated keys, and the prompts are checked in a browser, but the round trip through Access has not been run. In particular, confirm in `both` mode that the Access cookie set for `/api/admin` is sent on the console's background requests.
 - **`DNS_MODE=api`.** The Email Routing API calls were written from the API reference and have not been run against a live zone. Use `manual` until you have drilled it.
 - **Email Sending in production,** including how quickly a new sending domain's daily quota grows. Check the quota before you rely on it for a whole company.
 

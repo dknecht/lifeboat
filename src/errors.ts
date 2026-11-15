@@ -36,6 +36,9 @@ export class LoginRejected extends Data.TaggedError("LoginRejected")<{
   readonly reason: "invalid" | "locked";
 }> {}
 
+/** A Cloudflare Access token was missing something or failed verification. `reason` is for logs. */
+export class AccessRejected extends Data.TaggedError("AccessRejected")<{ readonly reason: string }> {}
+
 /** A failover transition was refused or a DNS change failed. */
 export class FailoverError extends Data.TaggedError("FailoverError")<{ readonly message: string }> {}
 
@@ -45,10 +48,17 @@ export class FailoverError extends Data.TaggedError("FailoverError")<{ readonly 
 export class ApiError extends Data.TaggedError("ApiError")<{
   readonly status: 400 | 401 | 403 | 404 | 409 | 415 | 429 | 502;
   readonly message: string;
+  /** A stable identifier the web client can act on, where the status alone is not enough. */
+  readonly code?: "access_required";
 }> {}
 
 export const badRequest = (message: string) => new ApiError({ status: 400, message });
 export const unauthorized = () => new ApiError({ status: 401, message: "Sign in to continue." });
+
+/** The caller is known, but this route only admits people who came through Cloudflare Access. */
+export const accessRequired = () =>
+  new ApiError({ status: 401, code: "access_required", message: "Sign in through Cloudflare Access to continue." });
+
 export const forbidden = () => new ApiError({ status: 403, message: "Administrator access is required." });
 export const notFound = (message: string) => new ApiError({ status: 404, message });
 export const conflict = (message: string) => new ApiError({ status: 409, message });

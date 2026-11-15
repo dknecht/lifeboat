@@ -8,6 +8,8 @@ export class ApiFailure extends Error {
     message: string,
     /** The HTTP status, or 0 when there was no response. */
     readonly status: number,
+    /** A stable identifier from the API for failures the interface handles specially. */
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiFailure";
@@ -26,7 +28,7 @@ async function send<S extends Schema.ConstraintDecoder<unknown>>(path: string, s
   if (!response.ok) {
     const failure = Option.getOrUndefined(decodeFailure(payload));
 
-    throw new ApiFailure(failure?.error ?? `The request failed (HTTP ${response.status}).`, response.status);
+    throw new ApiFailure(failure?.error ?? `The request failed (HTTP ${response.status}).`, response.status, failure?.code);
   }
 
   const decoded = Schema.decodeUnknownOption(schema)(payload);

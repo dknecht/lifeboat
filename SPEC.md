@@ -168,6 +168,17 @@ Entra ID cannot be relied on during a Microsoft outage, so v1 uses **local accou
 
 Details: PBKDF2-SHA-256 with 100,000 iterations and a per-user salt; opaque session tokens stored hashed; `HttpOnly`, `Secure`, `SameSite=Strict` cookies; five failed logins lock the account for 15 minutes; state-changing requests require a JSON content type.
 
+### Authentication through Cloudflare Access
+
+`AUTH_MODE` adds two alternatives to local accounts:
+
+- **`access`**: Cloudflare Access protects the whole hostname and is the only way in. Lifeboat has no passwords, sessions, or invites in this mode.
+- **`both`**: users keep local passwords for mail, and Access protects the admin path. A local session is not enough to reach an admin route.
+
+The Worker verifies the `Cf-Access-Jwt-Assertion` token itself (RS256 signature against the team's published keys, audience, issuer, expiry) and maps the email claim to a user by any of their addresses. A person with no account is created on arrival if their address is in the mail domain or they are a listed administrator. Listed service tokens act as automation. In `local` mode the header is ignored.
+
+Access only helps if it can authenticate people without Microsoft. It needs an identity provider other than Entra ID, and its emailed one-time PIN is no use when the destination is the mailbox that is down.
+
 Admins are users with `role = 'admin'`. Automation (an external monitor, the first bootstrap) authenticates with the `ADMIN_TOKEN` secret as a bearer token.
 
 ---
@@ -254,6 +265,7 @@ lifeboat/
 │   ├── errors.ts       tagged errors
 │   ├── api.ts          HTTP router and handlers
 │   ├── auth.ts         password hashing, sessions, invites
+│   ├── access.ts       Cloudflare Access token verification
 │   ├── inbound.ts      receive, parse, store
 │   ├── outbound.ts     send through Email Sending
 │   ├── failover.ts     state machine and Cloudflare DNS control
@@ -276,7 +288,8 @@ lifeboat/
 | **Declarative MX switch** | Model the Microsoft MX record, Email Routing, and the catch-all rule as Alchemy resources, so that an outage can be declared with a deploy as well as from the admin console. Needs care over the order in which records are removed and routing is enabled. |
 | **Always-inline mode** | MX on Cloudflare permanently. Every message is stored in a rolling window and forwarded to Microsoft 365, so users have recent history the moment an outage starts and no MX flip is needed. Requires a forwarding path that preserves sender authentication (a Microsoft inbound connector). |
 | **Journaling mode** | MX stays on Microsoft; a journal rule copies mail to a Lifeboat address for history. Combined with the MX flip for new mail. |
-| **Passkeys and a second identity provider** | WebAuthn enrollment, and OIDC sign-in through a non-Microsoft provider. Magic links to a personal address as a fallback. |
+| **Passkeys** | WebAuthn enrollment as a stronger local credential than a password. |
+| **Personal-address sign-in through Access** | Map a personal address to a work account so that Access's emailed one-time PIN can be used when the work mailbox is down. |
 | **Scheduled directory sync** | Keep users, aliases, shared mailboxes, and distribution groups current automatically. |
 | **Calendar and contacts** | Read-only snapshot of calendars and the global address list, refreshed while healthy. |
 | **Threaded conversations, search, drafts** | `thread_id` is already stored. Search through D1 full-text indexing. |

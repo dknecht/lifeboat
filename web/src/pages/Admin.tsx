@@ -1,15 +1,18 @@
 import { Badge } from "@cloudflare/kumo/components/badge";
 import { Button } from "@cloudflare/kumo/components/button";
+import { Empty } from "@cloudflare/kumo/components/empty";
 import { Input } from "@cloudflare/kumo/components/input";
 import { Select } from "@cloudflare/kumo/components/select";
 import { Surface } from "@cloudflare/kumo/components/surface";
 import { Table } from "@cloudflare/kumo/components/table";
+import { ShieldCheckIcon } from "@phosphor-icons/react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { messageOf } from "../api/client";
+import { ApiFailure, messageOf } from "../api/client";
 import {
   useActivate,
   useAdminUsers,
   useAssignHeld,
+  accessLoginHref,
   useAuditLog,
   useCreateUser,
   useDeactivate,
@@ -19,7 +22,7 @@ import {
   useOverview,
   useRunSync,
 } from "../api/queries";
-import type { AdminUser, MessageSummary, Overview } from "../api/schemas";
+import type { AdminUser, AuthMode, MessageSummary, Overview } from "../api/schemas";
 import { Notice, Spinner, Stencil } from "../components/ui";
 import { fullDate, shortDate } from "../lib/format";
 import { useTitle } from "../lib/router";
@@ -184,7 +187,8 @@ function SyncCard({ overview }: { overview: Overview }) {
   );
 }
 
-function UserRow({ user, onInvite }: { user: AdminUser; onInvite: (user: AdminUser, send: boolean) => void }) {
+/** `onInvite` is null when sign-in is through Access only, which hides the password columns. */
+function UserRow({ user, onInvite }: { user: AdminUser; onInvite: ((user: AdminUser, send: boolean) => void) | null }) {
   return (
     <Table.Row>
       <Table.Cell className="[overflow-wrap:anywhere]">
@@ -193,22 +197,29 @@ function UserRow({ user, onInvite }: { user: AdminUser; onInvite: (user: AdminUs
       </Table.Cell>
       <Table.Cell>{user.displayName}</Table.Cell>
       <Table.Cell>{user.role}</Table.Cell>
-      <Table.Cell>{user.enrolled ? "Password set" : "Not enrolled"}</Table.Cell>
-      <Table.Cell>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          <button type="button" className="text-kumo-link underline" onClick={() => onInvite(user, false)}>
-            New invite link
-          </button>
-          <button type="button" className="text-kumo-link underline" onClick={() => onInvite(user, true)}>
-            Email invite
-          </button>
-        </div>
-      </Table.Cell>
+      {onInvite && (
+        <>
+          <Table.Cell>{user.enrolled ? "Password set" : "Not enrolled"}</Table.Cell>
+          <Table.Cell>
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              <button type="button" className="text-kumo-link underline" onClick={() => onInvite(user, false)}>
+                New invite link
+              </button>
+              <button type="button" className="text-kumo-link underline" onClick={() => onInvite(user, true)}>
+                Email invite
+              </button>
+            </div>
+          </Table.Cell>
+        </>
+      )}
     </Table.Row>
   );
 }
 
-function UsersCard({ overview }: { overview: Overview }) {
+function UsersCard({ overview, authMode }: { overview: Overview; authMode: AuthMode }) {
+  // With Access as the only way in, nobody sets a Lifeboat password, so there are no invites to issue.
+  const invites = authMode !== "access";
+
   const users = useAdminUsers();
   const create = useCreateUser();
   const invite = useInvite();
@@ -225,7 +236,8 @@ function UsersCard({ overview }: { overview: Overview }) {
       { email, displayName: name, role },
       {
         onSuccess: (result) => {
-          setIssued({ email: result.user.email, link: result.inviteLink, sent: false });
+          if (result.inviteLink) setIssued({ email: result.user.email, link: result.inviteLink, sent: false });
+
           setEmail("");
           setName("");
         },
@@ -270,9 +282,9 @@ function UsersCard({ overview }: { overview: Overview }) {
         )}
         {users.isPending && <Spinner label="Loading users" />}
         {users.isSuccess && (
-          <DataTable headers={["Email", "Name", "Role", "Status", "Invite"]} empty="No users yet. Add one below.">
+          <DataTable headers={invites ? ["Email", "Name", "Role", "Status", "Invite"] : ["Email", "Name", "Role"]} empty="No users yet. Add one below.">
             {users.data.users.map((user) => (
-              <UserRow key={user.id} user={user} onInvite={sendInvite} />
+              <UserRow key={user.id} user={user} onInvite={invites ? sendInvite : null} />
             ))}
           </DataTable>
         )}
@@ -374,12 +386,29 @@ function AuditCard() {
 }
 
 /** The continuity console: declare and end an outage, manage users, review held mail. */
-export function AdminPage() {
+export function AdminPage({ authMode }: { authMode: AuthMode }) {
   const overview = useOverview();
 
   useTitle("Admin");
 
   if (overview.isPending) return <Spinner label="Loading the console" />;
+
+  if (overview.isError && overview.error instanceof ApiFailure && overview.error.code === "access_required") {
+    return (
+      <div className="grid w-full place-items-center p-6">
+        <Empty
+          icon={<ShieldCheckIcon size={48} />}
+          title="The bridge is behind Cloudflare Access"
+          description="The admin console needs a second sign-in through your organisation's identity provider."
+          contents={
+            <a href={accessLoginHref("admin")} className="rounded-lg bg-kumo-brand px-3.5 py-2 text-sm font-medium text-white no-underline">
+              Continue with Cloudflare Access
+            </a>
+          }
+        />
+      </div>
+    );
+  }
 
   if (overview.isError) {
     return (
@@ -406,7 +435,7 @@ export function AdminPage() {
           <Stat value={data.held} label="held for review" />
         </div>
         <SyncCard overview={data} />
-        <UsersCard overview={data} />
+        <UsersCard overview={data} authMode={authMode} />
         <HeldCard />
         <AuditCard />
       </div>

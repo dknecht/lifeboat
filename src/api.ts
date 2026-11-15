@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
+import { ACCESS_HEADER, verifyAccessToken } from "./access";
 import {
   MIN_PASSWORD_LENGTH,
   SESSION_COOKIE,
@@ -8,15 +9,18 @@ import {
   createUser,
   getSessionUser,
   getUserAddresses,
+  getUserByAddress,
   getUserById,
   getUserByEmail,
   issueInvite,
   login,
   logout,
   sessionCookie,
+  setRole,
 } from "./auth";
 import {
   ApiError,
+  accessRequired,
   badRequest,
   conflict,
   forbidden,
@@ -40,7 +44,11 @@ import { isValidAddress, normalizeAddress, timingSafeEqual } from "./util";
 
 // ── Request context ──────────────────────────────────────────────────────────
 
-type Actor = { readonly kind: "user"; readonly user: UserRow } | { readonly kind: "token" };
+type Actor =
+  /** A person, and how they proved who they are: a Lifeboat session or a Cloudflare Access token. */
+  | { readonly kind: "user"; readonly user: UserRow; readonly via: "session" | "access" }
+  /** Automation: the admin token, or an Access service token that is allowed to administer. */
+  | { readonly kind: "token" };
 
 interface Ctx {
   readonly request: Request;
@@ -63,9 +71,72 @@ const cookie = (request: Request, name: string) =>
     .map((pair) => pair.split("="))
     .find(([key]) => key === name)?.[1] ?? null;
 
-/** Resolves who is calling: the automation token, a signed-in user, or nobody. */
+/**
+ * Finds the Lifeboat user for someone Access has already authenticated.
+ *
+ * Access decides who may come in, so a person without a Lifeboat account gets one on arrival if
+ * they are a listed administrator or their address is in the mail domain. Anyone else is refused.
+ */
+const userFromAccess = Effect.fn("userFromAccess")(function* (email: string) {
+  const config = yield* AppConfig;
+  const isAdmin = config.accessAdminEmails.includes(email);
+  const existing = yield* getUserByAddress(email);
+
+  if (existing) {
+    if (isAdmin && existing.role !== "admin") {
+      yield* setRole(existing.id, "admin");
+
+      return { ...existing, role: "admin" } satisfies UserRow;
+    }
+
+    return existing;
+  }
+
+  if (!isAdmin && !email.endsWith(`@${config.mailDomain}`)) return null;
+
+  const { user } = yield* createUser({ email, role: isAdmin ? "admin" : "user" });
+
+  yield* audit(email, "user.provisioned", "Created on first sign-in through Cloudflare Access.");
+
+  return user;
+});
+
+/** Resolves an identity from the Access token on the request, or null if there is none worth trusting. */
+const actorFromAccess = Effect.fn("actorFromAccess")(function* (request: Request) {
+  const config = yield* AppConfig;
+  const token = request.headers.get(ACCESS_HEADER);
+
+  // In local mode the header is ignored entirely, so it cannot be used to claim an identity.
+  if (!token || config.authMode === "local") return null;
+
+  const identity = yield* verifyAccessToken(token).pipe(
+    Effect.tapError((error) => Effect.logWarning(`Access token refused: ${error.reason}`)),
+    Effect.orElseSucceed(() => null),
+  );
+
+  if (!identity) return null;
+
+  if (identity.kind === "service") {
+    const automation: Actor | null = config.accessAdminServiceTokens.includes(identity.clientId)
+      ? { kind: "token" }
+      : null;
+
+    return automation;
+  }
+
+  const user = yield* userFromAccess(identity.email);
+  const person: Actor | null = user ? { kind: "user", user, via: "access" } : null;
+
+  return person;
+});
+
+/** Resolves who is calling: someone Access vouches for, the automation token, a session, or nobody. */
 const resolveActor = Effect.fn("resolveActor")(function* (request: Request) {
   const config = yield* AppConfig;
+  const fromAccess = yield* actorFromAccess(request);
+
+  if (fromAccess) return fromAccess;
+
   const bearer = request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
 
   if (bearer && config.adminToken && timingSafeEqual(bearer, Redacted.value(config.adminToken))) {
@@ -74,10 +145,12 @@ const resolveActor = Effect.fn("resolveActor")(function* (request: Request) {
     return automation;
   }
 
+  // In access mode Lifeboat sessions do not exist; Access is the only way in.
+  if (config.authMode === "access") return null;
+
   const token = cookie(request, SESSION_COOKIE);
   const user = token ? yield* getSessionUser(token) : null;
-
-  const signedIn: Actor | null = user ? { kind: "user", user } : null;
+  const signedIn: Actor | null = user ? { kind: "user", user, via: "session" } : null;
 
   return signedIn;
 });
@@ -85,14 +158,29 @@ const resolveActor = Effect.fn("resolveActor")(function* (request: Request) {
 const requireUser = (ctx: Ctx) =>
   ctx.actor?.kind === "user" ? Effect.succeed(ctx.actor.user) : Effect.fail(unauthorized());
 
-/** Admits administrators and the automation token, and returns a name for the audit log. */
-const requireAdmin = (ctx: Ctx) => {
-  if (!ctx.actor) return Effect.fail(unauthorized());
+/** Admits administrators and automation, and returns a name for the audit log. */
+const requireAdmin = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    const config = yield* AppConfig;
 
-  if (ctx.actor.kind === "token") return Effect.succeed("admin-token");
+    // Outside local mode the admin console is only open to people who came through Access.
+    if (!ctx.actor) return yield* config.authMode === "local" ? unauthorized() : accessRequired();
 
-  return ctx.actor.user.role === "admin" ? Effect.succeed(ctx.actor.user.email) : Effect.fail(forbidden());
-};
+    if (ctx.actor.kind === "token") return "admin-token";
+
+    if (ctx.actor.user.role !== "admin") return yield* forbidden();
+
+    if (config.authMode !== "local" && ctx.actor.via !== "access") return yield* accessRequired();
+
+    return ctx.actor.user.email;
+  });
+
+/** Refuses a password-based route when Access is the only way to sign in. */
+const requireLocalSignIn = Effect.gen(function* () {
+  const config = yield* AppConfig;
+
+  if (config.authMode === "access") return yield* conflict("Sign in through Cloudflare Access.");
+});
 
 /** Decodes the JSON request body against a schema, failing with a 400 that carries `message`. */
 const body = <S extends Schema.Top>(ctx: Ctx, schema: S, message: string) =>
@@ -133,11 +221,13 @@ const status = () =>
   Effect.gen(function* () {
     const config = yield* AppConfig;
 
-    return json({ state: yield* getState, domain: config.mailDomain });
+    return json({ state: yield* getState, domain: config.mailDomain, authMode: config.authMode });
   });
 
 const postLogin = (ctx: Ctx) =>
   Effect.gen(function* () {
+    yield* requireLocalSignIn;
+
     const input = yield* body(ctx, Credentials, "Enter your email address and password.");
 
     const result = yield* login(input.email, input.password).pipe(
@@ -157,6 +247,8 @@ const postLogin = (ctx: Ctx) =>
 
 const postAcceptInvite = (ctx: Ctx) =>
   Effect.gen(function* () {
+    yield* requireLocalSignIn;
+
     const input = yield* body(ctx, InviteAcceptance, "The invite link is incomplete.");
 
     if (input.password.length < MIN_PASSWORD_LENGTH) {
@@ -186,12 +278,36 @@ const postLogout = (ctx: Ctx) =>
 const getMe = (ctx: Ctx) =>
   Effect.gen(function* () {
     const user = yield* requireUser(ctx);
+    const config = yield* AppConfig;
 
     return json({
       user: publicUser(user),
       addresses: yield* getUserAddresses(user.id),
       state: yield* getState,
+      authMode: config.authMode,
+      via: ctx.actor?.kind === "user" ? ctx.actor.via : "session",
     });
+  });
+
+/** Where the Access sign-in page sends people once Access has let them through. */
+const AFTER_ACCESS = { admin: "/#/admin", inbox: "/#/inbox" };
+
+/**
+ * A page to navigate to, not to fetch. Access intercepts the navigation, signs the person in, and
+ * lets the request through; Lifeboat then sends them back into the app.
+ */
+const accessLogin = (ctx: Ctx) =>
+  Effect.gen(function* () {
+    if (ctx.actor?.kind !== "user" || ctx.actor.via !== "access") {
+      return new Response(
+        "Cloudflare Access did not sign you in. Check that an Access application covers this address and that your account is allowed.",
+        { status: 401, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } },
+      );
+    }
+
+    const next = ctx.url.searchParams.get("next") === "inbox" ? "inbox" : "admin";
+
+    return new Response(null, { status: 302, headers: { location: AFTER_ACCESS[next], "cache-control": "no-store" } });
   });
 
 // ── Mail routes ──────────────────────────────────────────────────────────────
@@ -433,7 +549,10 @@ const postUser = (ctx: Ctx) =>
       aliases: input.aliases,
     });
 
-    const link = yield* inviteLink(user.id);
+    const config = yield* AppConfig;
+    // With Access as the only way in there is no password to set, so no invite is issued.
+    const link = config.authMode === "access" ? null : yield* inviteLink(user.id);
+
     yield* audit(actor, "user.create", `${email} (${user.role})`);
 
     return json({ user: publicUser(user), inviteLink: link }, 201);
@@ -442,6 +561,9 @@ const postUser = (ctx: Ctx) =>
 const postInvite = (ctx: Ctx) =>
   Effect.gen(function* () {
     const actor = yield* requireAdmin(ctx);
+
+    yield* requireLocalSignIn;
+
     const config = yield* AppConfig;
     const mailer = yield* Mailer;
     const input = yield* body(ctx, Schema.Struct({ send: Schema.optional(Schema.Boolean) }), "Invalid request.");
@@ -580,6 +702,7 @@ const routes = [
   route("POST", "/api/messages", postMessage),
   route("GET", "/api/messages/:id", getMessage),
   route("GET", "/api/messages/:id/attachments/:idx", getAttachment),
+  route("GET", "/api/admin/access-login", accessLogin),
   route("GET", "/api/admin/overview", overview),
   route("POST", "/api/admin/failover/activate", postActivate),
   route("POST", "/api/admin/failover/deactivate", postDeactivate),
@@ -624,7 +747,7 @@ export const handleApi = (request: Request): Effect.Effect<Response, never, AppS
     return yield* notFound("Not found.");
   }).pipe(
     Effect.catchTags({
-      ApiError: (e) => Effect.succeed(json({ error: e.message }, e.status)),
+      ApiError: (e) => Effect.succeed(json(e.code ? { error: e.message, code: e.code } : { error: e.message }, e.status)),
       FailoverError: (e) => Effect.succeed(json({ error: e.message }, 409)),
       GraphNotConfigured: (e) => Effect.succeed(json({ error: e.message }, 400)),
       GraphError: (e) => Effect.succeed(json({ error: e.message }, 502)),

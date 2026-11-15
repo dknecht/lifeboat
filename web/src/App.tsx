@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { messageOf } from "./api/client";
-import { useFolder, useSession } from "./api/queries";
+import { useFolder, useSession, useStatus } from "./api/queries";
 import type { Message, Session } from "./api/schemas";
 import { AppShell } from "./components/AppShell";
 import { Compose } from "./components/Compose";
 import { Notice, Spinner } from "./components/ui";
 import { parseRoute, useHash, type Route } from "./lib/router";
 import { AdminPage } from "./pages/Admin";
-import { InvitePage, LoginPage } from "./pages/Auth";
+import { AccessSignInPage, InvitePage, LoginPage } from "./pages/Auth";
 import { MailPage } from "./pages/Mail";
 
 /** What the compose dialog is doing: closed, a new message, or a reply to `replyTo`. */
@@ -22,7 +22,7 @@ function SignedIn({ session, route }: { session: Session; route: Route }) {
 
   return (
     <AppShell session={session} route={route} unread={unread} onCompose={() => setComposing({ open: true, replyTo: null })}>
-      {showAdmin && <AdminPage />}
+      {showAdmin && <AdminPage authMode={session.authMode} />}
       {route.name === "mail" && (
         <MailPage folder={route.folder} messageId={route.messageId} onReply={(replyTo) => setComposing({ open: true, replyTo })} />
       )}
@@ -42,6 +42,7 @@ function SignedIn({ session, route }: { session: Session; route: Route }) {
 export function App() {
   const route = parseRoute(useHash());
   const session = useSession();
+  const status = useStatus();
 
   if (route.name === "invite") return <InvitePage token={route.token} />;
 
@@ -55,7 +56,14 @@ export function App() {
     );
   }
 
-  if (!session.data) return <LoginPage />;
+  if (!session.data) {
+    if (status.isPending) return <Spinner label="Loading Lifeboat" />;
+
+    // If the status cannot be read, fall back to the password form, which reports its own errors.
+    const authMode = status.data?.authMode ?? "local";
+
+    return authMode === "access" ? <AccessSignInPage /> : <LoginPage authMode={authMode} />;
+  }
 
   // Someone already signed in who follows a link to the sign-in page belongs in their inbox.
   const signedInRoute: Route = route.name === "login" ? { name: "mail", folder: "inbox", messageId: null } : route;

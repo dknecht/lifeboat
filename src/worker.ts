@@ -56,6 +56,11 @@ const secret = (name: string) =>
 /** Every configuration value the application reads. Yielding a Config here also binds it to the Worker. */
 const settings = Config.all({
   MAIL_DOMAIN: Config.String("MAIL_DOMAIN"),
+  AUTH_MODE: text("AUTH_MODE", "local"),
+  ACCESS_TEAM_DOMAIN: text("ACCESS_TEAM_DOMAIN", ""),
+  ACCESS_AUD: text("ACCESS_AUD", ""),
+  ACCESS_ADMIN_EMAILS: text("ACCESS_ADMIN_EMAILS", ""),
+  ACCESS_ADMIN_SERVICE_TOKENS: text("ACCESS_ADMIN_SERVICE_TOKENS", ""),
   APP_URL: Config.String("APP_URL"),
   DNS_MODE: text("DNS_MODE", "manual"),
   UNKNOWN_RECIPIENT: text("UNKNOWN_RECIPIENT", "hold"),

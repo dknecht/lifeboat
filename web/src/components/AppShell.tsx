@@ -2,7 +2,7 @@ import { Button } from "@cloudflare/kumo/components/button";
 import { Tooltip } from "@cloudflare/kumo/components/tooltip";
 import { PaperPlaneTiltIcon, PencilSimpleLineIcon, ShieldCheckIcon, SignOutIcon, TrayIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { useLogout } from "../api/queries";
+import { ACCESS_LOGOUT_HREF, useLogout } from "../api/queries";
 import type { Session } from "../api/schemas";
 import { hrefFor, navigate, type Route } from "../lib/router";
 import { Brand, StateBadge, cx } from "./ui";
@@ -53,6 +53,13 @@ export function AppShell({ session, route, unread, onCompose, children }: AppShe
   const folder = route.name === "mail" ? route.folder : null;
 
   function signOut() {
+    // Someone Access let in has no Lifeboat session to end; signing out means leaving Access.
+    if (session.via === "access") {
+      location.assign(ACCESS_LOGOUT_HREF);
+
+      return;
+    }
+
     logout.mutate(undefined, { onSettled: () => navigate({ name: "login" }) });
   }
 
