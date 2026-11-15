@@ -1,31 +1,3 @@
-export interface Env {
-  DB: D1Database;
-  MAIL: R2Bucket;
-  EMAIL: Mailer;
-
-  WORKER_NAME: string;
-  MAIL_DOMAIN: string;
-  APP_URL: string;
-  DNS_MODE: string;
-  UNKNOWN_RECIPIENT: string;
-  AUTO_FAILOVER: string;
-  PROBE_THRESHOLD: string;
-  RETENTION_DAYS: string;
-  GRAPH_TENANT_ID: string;
-  GRAPH_CLIENT_ID: string;
-  GRAPH_CANARY_MAILBOX: string;
-  CF_ZONE_ID: string;
-
-  ADMIN_TOKEN?: string;
-  GRAPH_CLIENT_SECRET?: string;
-  CF_API_TOKEN?: string;
-}
-
-/** The structured send API of the Cloudflare Email Sending binding. */
-export interface Mailer {
-  send(message: OutgoingEmail): Promise<{ messageId?: string }>;
-}
-
 export interface OutgoingEmail {
   from: string | { email: string; name?: string };
   to: string[];

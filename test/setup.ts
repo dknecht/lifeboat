@@ -1,10 +1,12 @@
 import { applyD1Migrations, env, reset, type D1Migration } from "cloudflare:test";
 import { beforeEach } from "vitest";
-import type { Env } from "../src/types";
+import { outbox } from "./helpers";
 
 // Every test starts from empty storage with the schema applied.
 beforeEach(async () => {
   await reset();
-  const bindings = env as unknown as Env & { TEST_MIGRATIONS: D1Migration[] };
+  outbox.sent = [];
+  outbox.fail = false;
+  const bindings = env as unknown as { DB: D1Database; TEST_MIGRATIONS: D1Migration[] };
   await applyD1Migrations(bindings.DB, bindings.TEST_MIGRATIONS);
 });

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getState } from "../src/db";
+import { handleScheduled } from "../src/app";
 import { buildGraphMessage } from "../src/graph";
 import { runProbe } from "../src/health";
-import { handleInbound } from "../src/inbound";
+import { getState } from "../src/settings";
 import { retentionSweep } from "../src/sync";
 import type { MessageRow } from "../src/types";
-import { ADMIN, call, enrolledUser, fakeMailer, inboundEmail, rawEmail, testEnv } from "./helpers";
+import { ADMIN, call, deliverOk, enrolledUser, rawEmail, run, testEnv } from "./helpers";
 
 const json = async <T = any>(res: Response) => (await res.json()) as T;
 const reply = (body: unknown, status = 200) =>
@@ -37,8 +37,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("failover lifecycle", () => {
   it("runs a full incident: activate, receive, reply, deactivate, sync back, return to standby", async () => {
     const { cookie } = await enrolledUser("lee@example.com");
-    fakeMailer(testEnv);
-    expect(await getState(testEnv)).toBe("standby");
+    expect(await run(getState)).toBe("standby");
 
     const activated = await json(await call("/admin/failover/activate", { method: "POST", headers: ADMIN, body: { reason: "EX123 outage" } }));
     expect(activated).toMatchObject({ state: "active", dnsMode: "manual" });
@@ -47,7 +46,7 @@ describe("failover lifecycle", () => {
     expect((await call("/admin/failover/activate", { method: "POST", headers: ADMIN })).status).toBe(409);
 
     const raw = rawEmail({ from: "client@other.test", to: "lee@example.com", subject: "During outage", html: "<p>Hello <b>Lee</b></p>", messageId: "<in1@other.test>", });
-    const inbound = await handleInbound(inboundEmail("client@other.test", "lee@example.com", raw), testEnv);
+    const inbound = { id: await deliverOk("client@other.test", "lee@example.com", raw) };
     await call("/messages", { method: "POST", headers: { cookie }, body: { to: ["client@other.test"], subject: "Re: During outage", text: "Got it", inReplyToId: inbound.id } });
 
     const deactivated = await json(await call("/admin/failover/deactivate", { method: "POST", headers: ADMIN }));
@@ -79,7 +78,7 @@ describe("failover lifecycle", () => {
 
   it("keeps a message pending and records the error when Graph refuses it", async () => {
     await enrolledUser("mo@example.com");
-    await handleInbound(inboundEmail("x@y.test", "mo@example.com", rawEmail({ from: "x@y.test", to: "mo@example.com", subject: "s", text: "t" })), testEnv);
+    await deliverOk("x@y.test", "mo@example.com", rawEmail({ from: "x@y.test", to: "mo@example.com", subject: "s", text: "t" }));
     fakeGraph({ failCreate: true });
     const sync = await json(await call("/admin/sync/run", { method: "POST", headers: ADMIN }));
     expect(sync).toMatchObject({ attempted: 1, synced: 0, failed: 1, remaining: 1 });
@@ -90,7 +89,7 @@ describe("failover lifecycle", () => {
 
   it("skips an item that already exists in the mailbox", async () => {
     await enrolledUser("ned@example.com");
-    await handleInbound(inboundEmail("x@y.test", "ned@example.com", rawEmail({ from: "x@y.test", to: "ned@example.com", subject: "s", text: "t", messageId: "<dup@y.test>" })), testEnv);
+    await deliverOk("x@y.test", "ned@example.com", rawEmail({ from: "x@y.test", to: "ned@example.com", subject: "s", text: "t", messageId: "<dup@y.test>" }));
     const calls = fakeGraph();
     const original = globalThis.fetch;
     vi.stubGlobal("fetch", async (input: any, init?: any) =>
@@ -103,38 +102,54 @@ describe("failover lifecycle", () => {
   });
 });
 
+describe("scheduled job", () => {
+  it("drains sync-back while recovering and returns to standby", async () => {
+    await enrolledUser("pat@example.com");
+    await call("/admin/failover/activate", { method: "POST", headers: ADMIN });
+    await deliverOk("x@y.test", "pat@example.com", rawEmail({ from: "x@y.test", to: "pat@example.com", subject: "s", text: "t" }));
+    await call("/admin/failover/deactivate", { method: "POST", headers: ADMIN });
+    expect(await run(getState)).toBe("recovering");
+
+    fakeGraph();
+    await run(handleScheduled);
+    expect(await run(getState)).toBe("standby");
+    const row = await testEnv.DB.prepare("SELECT sync_status FROM messages").first<any>();
+    expect(row.sync_status).toBe("synced");
+  });
+});
+
 describe("health probe", () => {
   it("marks Microsoft 365 degraded after the threshold and activates when auto-failover is on", async () => {
     fakeGraph({ down: true });
-    expect((await runProbe(testEnv)).status).toBe("unknown");
-    await runProbe(testEnv);
-    const third = await runProbe(testEnv);
+    expect((await run(runProbe)).status).toBe("unknown");
+    await run(runProbe);
+    const third = await run(runProbe);
     expect(third).toMatchObject({ status: "degraded", consecutiveFailures: 3 });
-    expect(await getState(testEnv)).toBe("standby");
+    expect(await run(getState)).toBe("standby");
 
-    await runProbe({ ...testEnv, AUTO_FAILOVER: "true" });
-    expect(await getState(testEnv)).toBe("active");
+    await run(runProbe, { AUTO_FAILOVER: "true" });
+    expect(await run(getState)).toBe("active");
   });
 
   it("reports healthy when Graph answers", async () => {
     fakeGraph();
-    expect(await runProbe(testEnv)).toMatchObject({ status: "healthy", consecutiveFailures: 0, lastError: null });
+    expect(await run(runProbe)).toMatchObject({ status: "healthy", consecutiveFailures: 0, lastError: null });
   });
 });
 
 describe("retention and message mapping", () => {
   it("deletes only messages synced before the retention window", async () => {
     await enrolledUser("oz@example.com");
-    const mk = () => handleInbound(inboundEmail("x@y.test", "oz@example.com", rawEmail({ from: "x@y.test", to: "oz@example.com", subject: "s", text: "t" })), testEnv);
+    const mk = () => deliverOk("x@y.test", "oz@example.com", rawEmail({ from: "x@y.test", to: "oz@example.com", subject: "s", text: "t" }));
     const [old, recent, pending] = [await mk(), await mk(), await mk()];
     const day = 24 * 60 * 60 * 1000;
-    await testEnv.DB.prepare("UPDATE messages SET sync_status = 'synced', synced_at = ? WHERE id = ?").bind(Date.now() - 31 * day, old.id).run();
-    await testEnv.DB.prepare("UPDATE messages SET sync_status = 'synced', synced_at = ? WHERE id = ?").bind(Date.now() - day, recent.id).run();
+    await testEnv.DB.prepare("UPDATE messages SET sync_status = 'synced', synced_at = ? WHERE id = ?").bind(Date.now() - 31 * day, old).run();
+    await testEnv.DB.prepare("UPDATE messages SET sync_status = 'synced', synced_at = ? WHERE id = ?").bind(Date.now() - day, recent).run();
 
-    expect(await retentionSweep(testEnv)).toBe(1);
-    expect(await testEnv.MAIL.get(`raw/${old.id}.eml`)).toBeNull();
-    expect(await testEnv.MAIL.get(`raw/${recent.id}.eml`)).not.toBeNull();
-    expect(await testEnv.MAIL.get(`raw/${pending.id}.eml`)).not.toBeNull();
+    expect(await run(retentionSweep())).toBe(1);
+    expect(await testEnv.MAIL.get(`raw/${old}.eml`)).toBeNull();
+    expect(await testEnv.MAIL.get(`raw/${recent}.eml`)).not.toBeNull();
+    expect(await testEnv.MAIL.get(`raw/${pending}.eml`)).not.toBeNull();
     const left = await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM messages").first<{ n: number }>();
     expect(left!.n).toBe(2);
   });

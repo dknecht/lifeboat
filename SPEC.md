@@ -29,7 +29,8 @@ Status: v0.1 prototype. Sections marked **Roadmap** are designed but not built.
 1. **No dependency on Microsoft at outage time.** Everything needed during an outage (directory, credentials, DNS control, sending identity) is provisioned while Microsoft 365 is healthy.
 2. **Cloudflare-native.** Workers, D1, R2, Email Routing, Email Sending, Cron Triggers. Nothing else.
 3. **The admin decides.** Health probes advise; a person declares the incident and ends it. Automatic failover is opt-in.
-4. **Never lose mail.** Raw MIME is written to R2 before the message is acknowledged. Unknown recipients are held, not bounced.
+4. **Never lose mail.** Raw MIME is written to R2 before the message is acknowledged. Unknown recipients are held, not bounced. If storage fails, the inbound event fails, Cloudflare answers with a temporary SMTP error, and the sending server retries.
+5. **Failures are part of the types.** The code is written in Effect: every operation declares how it can fail, dependencies are injected as services, and Graph calls retry transient errors on a schedule.
 
 ---
 
@@ -59,7 +60,7 @@ These were verified against Cloudflare and Microsoft documentation in November 2
                                                                    ▼
 ┌──────────────────────────── Lifeboat Worker ────────────────────────────┐
 │  email()      parse, store raw MIME + parts, index                      │
-│  fetch()      /api/*  (Hono)   +   static SPA (Workers Assets)          │
+│  fetch()      /api/*  (Effect)  +   static SPA (Workers Assets)          │
 │  scheduled()  health probe, sync-back drain, retention sweep            │
 └───────┬───────────────┬──────────────────┬───────────────┬──────────────┘
         ▼               ▼                  ▼               ▼
@@ -69,9 +70,9 @@ These were verified against Cloudflare and Microsoft documentation in November 2
 
 | Service | Use |
 |---|---|
-| Workers | Single Worker with `fetch`, `email`, and `scheduled` handlers. |
+| Workers | Single Worker with `fetch`, `email`, and `scheduled` handlers, written in Effect. |
 | Workers Static Assets | The webmail and admin single-page app. No build step. |
-| Alchemy | Infrastructure as code. `alchemy.run.ts` declares the database, bucket, Worker, bindings, secrets, and cron trigger; `alchemy dev` runs the same stack locally. |
+| Alchemy | Infrastructure as code. `src/worker.ts` declares the database, bucket, bindings, configuration, and cron trigger beside the code that uses them; `alchemy dev` runs the same stack locally. |
 | D1 | Users, addresses, sessions, message index, incidents, audit log, settings. |
 | R2 | Raw MIME (`raw/<id>.eml`), parsed bodies (`body/<id>.json`), attachments (`att/<id>/<n>`). |
 | Email Routing | Inbound mail to the `email` handler through a catch-all rule. |
@@ -138,6 +139,8 @@ A message with several recipients at the domain is delivered to the Worker once 
 
 If parsing fails, the raw message is still stored and indexed with the envelope data, so nothing is lost.
 
+The email subscription is declared without a zone. Naming a zone would make Alchemy enable Email Routing and the catch-all rule on every deploy, which would switch MX permanently.
+
 ---
 
 ## 6. Webmail and sending
@@ -180,7 +183,7 @@ For each message:
    - `Integer 0x0E07 = 1` (`PidTagMessageFlags`), so the item is not a draft;
    - `SystemTime 0x0E06` and `SystemTime 0x0039`, the original delivery and submit times.
 3. **Attachments.** Files under 3 MB are added inline as `fileAttachment`; larger files go through an upload session.
-4. Mark `synced` and store the Graph ID. On failure, record the error and retry on the next run, up to 8 attempts.
+4. Mark `synced` and store the Graph ID. Throttling and gateway errors are retried twice with exponential backoff within the run. On failure, record the error and retry on the next run, up to 8 attempts.
 
 Required application permission: `Mail.ReadWrite`. Scope it to the mailboxes you intend to cover with Exchange RBAC for Applications.
 
@@ -242,11 +245,14 @@ All routes are under `/api`. Bodies are JSON.
 ```
 lifeboat/
 ├── SPEC.md, README.md
-├── alchemy.run.ts      infrastructure: D1, R2, Worker, bindings, secrets, cron
+├── alchemy.run.ts      deployment stack
 ├── migrations/0001_init.sql
 ├── src/
-│   ├── index.ts        fetch, email, scheduled entry points
-│   ├── api.ts          Hono routes
+│   ├── worker.ts       Alchemy Worker: resources, bindings, fetch/email/cron wiring
+│   ├── app.ts          platform-independent entry points
+│   ├── services.ts     Db, Blobs, Mailer, AppConfig services and their layers
+│   ├── errors.ts       tagged errors
+│   ├── api.ts          HTTP router and handlers
 │   ├── auth.ts         password hashing, sessions, invites
 │   ├── inbound.ts      receive, parse, store
 │   ├── outbound.ts     send through Email Sending
@@ -254,7 +260,7 @@ lifeboat/
 │   ├── graph.ts        Graph token, directory, message import
 │   ├── sync.ts         sync-back job and retention sweep
 │   ├── health.ts       probe
-│   └── db.ts, types.ts, util.ts
+│   └── settings.ts, http.ts, types.ts, util.ts
 ├── public/             index.html, app.js, style.css
 └── test/               Vitest suites running in the Workers runtime
 ```

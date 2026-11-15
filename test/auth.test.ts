@@ -55,13 +55,11 @@ describe("accounts", () => {
   });
 
   it("refuses state-changing requests that are not JSON", async () => {
-    const { default: worker } = await import("../src/index");
-    const { testEnv } = await import("./helpers");
-    const res = await worker.fetch(
-      new Request("https://lifeboat.test/api/auth/login", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "email=a&password=b" }),
-      testEnv,
-      {} as ExecutionContext,
-    );
+    const res = await call("/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      rawBody: "email=a&password=b",
+    });
     expect(res.status).toBe(415);
   });
 });

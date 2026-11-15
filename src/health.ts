@@ -1,8 +1,9 @@
-import { audit, getSetting, getState, setSetting } from "./db";
+import * as Effect from "effect/Effect";
 import { activate } from "./failover";
-import { getGraphToken, graphConfigured, probeMailbox } from "./graph";
-import type { Env } from "./types";
-import { intVar, now } from "./util";
+import { getGraphToken, probeMailbox } from "./graph";
+import { AppConfig } from "./services";
+import { audit, getSetting, getState, setSetting } from "./settings";
+import { now } from "./util";
 
 export interface ProbeHealth {
   configured: boolean;
@@ -23,44 +24,47 @@ const EMPTY: ProbeHealth = {
   lastError: null,
 };
 
-export async function getProbeHealth(env: Env): Promise<ProbeHealth> {
-  const configured = graphConfigured(env) && Boolean(env.GRAPH_CANARY_MAILBOX);
-  const saved = await getSetting(env, "probe");
-  return { ...EMPTY, ...(saved ? (JSON.parse(saved) as ProbeHealth) : {}), configured };
-}
+export const getProbeHealth = Effect.gen(function* () {
+  const config = yield* AppConfig;
+  const saved = yield* getSetting("probe");
+  return {
+    ...EMPTY,
+    ...(saved ? (JSON.parse(saved) as ProbeHealth) : {}),
+    configured: Boolean(config.graph && config.canaryMailbox),
+  } satisfies ProbeHealth;
+});
 
 /** Checks Entra ID and Exchange Online through Graph and updates the health counters. */
-export async function runProbe(env: Env): Promise<ProbeHealth> {
-  const health = await getProbeHealth(env);
+export const runProbe = Effect.gen(function* () {
+  const config = yield* AppConfig;
+  const health = yield* getProbeHealth;
   if (!health.configured) return health;
 
-  let error: string | null = null;
-  try {
-    await probeMailbox(env, await getGraphToken(env));
-  } catch (err) {
-    error = (err as Error).message.slice(0, 300);
-  }
+  const error = yield* getGraphToken.pipe(
+    Effect.flatMap((token) => probeMailbox(token, config.canaryMailbox)),
+    Effect.match({ onSuccess: () => null, onFailure: (e) => e.message.slice(0, 300) }),
+  );
 
-  const threshold = intVar(env.PROBE_THRESHOLD, 3);
   health.lastCheckedAt = now();
   health.lastError = error;
   if (error) {
     health.consecutiveFailures++;
     health.consecutiveSuccesses = 0;
-    if (health.consecutiveFailures >= threshold) health.status = "degraded";
+    if (health.consecutiveFailures >= config.probeThreshold) health.status = "degraded";
   } else {
     health.consecutiveSuccesses++;
     health.consecutiveFailures = 0;
-    if (health.consecutiveSuccesses >= threshold || health.status === "unknown") health.status = "healthy";
-  }
-  await setSetting(env, "probe", JSON.stringify(health));
-
-  if (health.status === "degraded" && env.AUTO_FAILOVER === "true" && (await getState(env)) === "standby") {
-    try {
-      await activate(env, "system", `Automatic failover after ${health.consecutiveFailures} failed probes: ${error}`);
-    } catch (err) {
-      await audit(env, "system", "failover.auto_failed", (err as Error).message);
+    if (health.consecutiveSuccesses >= config.probeThreshold || health.status === "unknown") {
+      health.status = "healthy";
     }
   }
+  yield* setSetting("probe", JSON.stringify(health));
+
+  if (health.status === "degraded" && config.autoFailover && (yield* getState) === "standby") {
+    yield* activate(
+      "system",
+      `Automatic failover after ${health.consecutiveFailures} failed probes: ${error}`,
+    ).pipe(Effect.catchTag("FailoverError", (e) => audit("system", "failover.auto_failed", e.message)));
+  }
   return health;
-}
+});

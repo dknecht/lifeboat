@@ -6,14 +6,12 @@ import { defineConfig } from "vitest/config";
 export default defineConfig(async () => ({
   plugins: [
     cloudflareTest({
-      main: "./src/index.ts",
       miniflare: {
         compatibilityDate: "2026-11-01",
         d1Databases: ["DB"],
         r2Buckets: ["MAIL"],
         bindings: {
           TEST_MIGRATIONS: await readD1Migrations("./migrations"),
-          WORKER_NAME: "lifeboat",
           MAIL_DOMAIN: "example.com",
           APP_URL: "https://lifeboat.test",
           DNS_MODE: "manual",

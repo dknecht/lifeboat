@@ -180,8 +180,14 @@ function inviteView(token) {
 
 function shell(current, content, unread) {
   const { user, state } = session;
+  // Following a link to the view that is already open reloads it, so "Inbox" doubles as a refresh.
   const link = (hash, label, extra) =>
-    h("a", { href: hash, "aria-current": current === hash ? "page" : null }, h("span", {}, label), extra);
+    h(
+      "a",
+      { href: hash, "aria-current": current === hash ? "page" : null, onclick: () => location.hash === hash && route() },
+      h("span", {}, label),
+      extra,
+    );
   const signOut = h("button", {}, "Sign out");
   signOut.addEventListener("click", async () => {
     await api("/auth/logout", { method: "POST" }).catch(() => {});
@@ -194,7 +200,7 @@ function shell(current, content, unread) {
       : state === "recovering"
         ? h("div", { class: "banner recovering", role: "status" }, "Microsoft 365 is back. Mail from the outage is being copied to your mailbox; new mail arrives in Outlook.")
         : null;
-  root.replaceChildren(
+  const parts = [
     h(
       "header",
       { class: "top" },
@@ -218,7 +224,9 @@ function shell(current, content, unread) {
       ),
       h("main", {}, content),
     ),
-  );
+  ];
+  // replaceChildren would render a missing banner as the text "null".
+  root.replaceChildren(...parts.filter(Boolean));
 }
 
 // ── Mail views ───────────────────────────────────────────────────────────────

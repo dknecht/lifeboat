@@ -20,7 +20,7 @@ An administrator declares and ends the outage. Because Cloudflare Email Routing 
 
 - The mail domain's DNS zone hosted on Cloudflare.
 - Workers Paid plan (Email Sending to arbitrary recipients needs it).
-- Deploys use [Alchemy](https://alchemy.run) v2 (beta), which is built on Effect. The Worker itself is plain TypeScript with no Effect runtime in its bundle.
+- Lifeboat is written in [Effect](https://effect.website) v4 and deployed with [Alchemy](https://alchemy.run) v2. Alchemy is in beta; pin its version and expect breaking changes.
 - A Microsoft Entra app registration with the application permissions `Mail.ReadWrite` (sync-back and health probe) and `User.Read.All` (directory import). Optional, but without it there is no sync-back.
 - Node.js 22 or later.
 
@@ -51,11 +51,17 @@ curl -X POST 'http://localhost:1337/cdn-cgi/handler/email?from=someone@other.tes
 
 Outbound mail is not delivered in local development; it is written to `.alchemy/local/email`.
 
+Trigger the periodic job by hand with the cron expression it is registered under:
+
+```sh
+curl 'http://localhost:1337/cdn-cgi/handler/scheduled?cron=*/5%20*%20*%20*%20*'
+```
+
 Run the checks with `npm test` and `npm run typecheck`.
 
 ## Deploy
 
-Infrastructure is defined in [`alchemy.run.ts`](alchemy.run.ts). One command creates the D1 database, applies migrations, creates the R2 bucket, and deploys the Worker with its bindings, secrets, static assets, and cron trigger. There is no Wrangler configuration.
+The Worker and the resources it needs are declared together in [`src/worker.ts`](src/worker.ts), and [`alchemy.run.ts`](alchemy.run.ts) deploys them. One command creates the D1 database, applies migrations, creates the R2 bucket, and deploys the Worker with its bindings, secrets, static assets, and cron trigger. There is no Wrangler configuration.
 
 Do all of this while Microsoft 365 is healthy.
 
@@ -84,7 +90,6 @@ Alchemy keeps deployment state in your Cloudflare account, so any machine or CI 
 | Variable | Default | Meaning |
 |---|---|---|
 | `MAIL_DOMAIN` | | The domain Lifeboat covers. |
-| `WORKER_NAME` | `lifeboat` | The Worker's script name, which the catch-all routing rule refers to. |
 | `APP_URL` | | Public URL, used in invite links. |
 | `DNS_MODE` | `manual` | `manual` shows the DNS steps to an admin. `api` changes MX through the Cloudflare API (experimental; needs `CF_ZONE_ID` and `CF_API_TOKEN`). |
 | `UNKNOWN_RECIPIENT` | `hold` | `hold` keeps mail for unknown addresses for admin review. `reject` refuses it. |
@@ -96,6 +101,15 @@ Alchemy keeps deployment state in your Cloudflare account, so any machine or CI 
 
 Secrets: `ADMIN_TOKEN`, `GRAPH_CLIENT_SECRET`, `CF_API_TOKEN`. All of these are read from the environment or `.env` at deploy time.
 
+## How the code is organized
+
+The application is a set of Effect programs that depend on four services: `Db` (D1), `Blobs` (R2), `Mailer` (Email Sending), and `AppConfig`.
+
+- `src/app.ts` exposes the three entry points: `handleRequest`, `handleInbound`, and `handleScheduled`. They know nothing about Cloudflare.
+- `src/worker.ts` is the only file that touches the platform. It declares the resources, builds the services from the Worker's bindings, and connects fetch, email, and cron events to the entry points.
+- `src/errors.ts` lists every way an operation can fail as a tagged error. The API turns them into responses in one place (`handleApi` in `src/api.ts`); an inbound storage failure is left to fail the event so that the sending server retries.
+- The tests run the same entry points against local D1 and R2 with a recording mailer, so they exercise the real code paths without the Alchemy runtime.
+
 ## What is and is not verified
 
 Verified locally (automated tests in the Workers runtime, plus a browser run against the local dev server):
@@ -103,14 +117,14 @@ Verified locally (automated tests in the Workers runtime, plus a browser run aga
 - Inbound capture, aliases, held mail, attachment storage and download, per-user isolation.
 - Enrollment, sign-in, lockout, sessions, admin authorization.
 - Sending with threading headers through the local Email Sending binding.
-- `npm run dev` through Alchemy: migrations, bindings, secrets, static assets, inbound mail, and the cron handler.
+- `npm run dev` through Alchemy's Effect runtime: migrations, bindings, secrets, static assets, inbound mail, sending, and the cron handler.
 - The failover state machine, health probe counters, retention sweep.
 - Sync-back request construction against a stubbed Microsoft Graph.
 - HTML mail is rendered with scripts and remote content blocked.
 
 Not yet verified against live services:
 
-- **`npm run deploy`.** The stack type-checks and runs locally, but it has not been deployed to a Cloudflare account. Alchemy v2 is in beta, so pin its version and expect breaking changes.
+- **`npm run deploy`.** The stack type-checks and runs locally, but it has not been deployed to a Cloudflare account.
 - **Sync-back against a real tenant.** Creating a message as a delivered (non-draft) item relies on setting the `PidTagMessageFlags` extended property at creation. This is widely used but not documented by Microsoft.
 - **`DNS_MODE=api`.** The Email Routing API calls were written from the API reference and have not been run against a live zone. Use `manual` until you have drilled it.
 - **Email Sending in production,** including how quickly a new sending domain's daily quota grows. Check the quota before you rely on it for a whole company.
