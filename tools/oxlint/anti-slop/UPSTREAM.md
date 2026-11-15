@@ -6,4 +6,5 @@
 - Installed at: `tools/oxlint/anti-slop/` (generic plugin `index.ts`, Effect plugin `effect/index.ts`)
 - Configuration: `oxlint.config.ts`; every generic rule and every Effect rule is enabled at `error`
 - Dependencies: `oxlint` and `@oxlint/plugins`, both pinned to 1.93.0
-- Intentional deviations: none
+- Intentional deviations:
+  - `rules/no-shape-in-symbol-names.ts` does not report JSX attribute names. A prop name belongs to the component's author, and the Kumo button's `shape` prop would otherwise be flagged at every use.

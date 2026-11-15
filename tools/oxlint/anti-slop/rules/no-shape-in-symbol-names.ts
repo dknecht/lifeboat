@@ -10,7 +10,11 @@ function containsForbiddenSymbolName(name: string): boolean {
 /** Return whether an identifier names a statically accessed member owned by another value. */
 function isBorrowedMemberName(node: ESTree.Node): boolean {
   const parent = node.parent;
-  if (parent === null || parent.type !== "MemberExpression") return false;
+  if (parent === null) return false;
+  // Local deviation from upstream: a JSX attribute name is a prop of the component being rendered,
+  // which belongs to that component's author (for example the `shape` prop of a library button).
+  if (parent.type === "JSXAttribute") return parent.name === node;
+  if (parent.type !== "MemberExpression") return false;
   return parent.property === node && parent.computed === false;
 }
 

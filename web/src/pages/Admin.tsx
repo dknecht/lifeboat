@@ -1,3 +1,9 @@
+import { Badge } from "@cloudflare/kumo/components/badge";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Input } from "@cloudflare/kumo/components/input";
+import { Select } from "@cloudflare/kumo/components/select";
+import { Surface } from "@cloudflare/kumo/components/surface";
+import { Table } from "@cloudflare/kumo/components/table";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { messageOf } from "../api/client";
 import {
@@ -14,7 +20,7 @@ import {
   useRunSync,
 } from "../api/queries";
 import type { AdminUser, MessageSummary, Overview } from "../api/schemas";
-import { Button, Field, Input, Notice, Pill, Spinner } from "../components/ui";
+import { Notice, Spinner, Stencil } from "../components/ui";
 import { fullDate, shortDate } from "../lib/format";
 import { useTitle } from "../lib/router";
 
@@ -22,40 +28,38 @@ const STATE_LABEL = { standby: "Standby", active: "Outage mode", recovering: "Re
 
 function Card({ title, action, children }: { title?: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-xl border border-line bg-surface p-5">
+    <Surface as="section" className="rounded-xl p-5">
       {title && (
         <div className="mb-3 flex items-center gap-3">
-          <h2 className="flex-1 text-base font-semibold">{title}</h2>
+          <h2 className="flex-1">
+            <Stencil className="text-2xl">{title}</Stencil>
+          </h2>
           {action}
         </div>
       )}
       {children}
-    </section>
+    </Surface>
   );
 }
 
-function Table({ headers, empty, children }: { headers: string[]; empty: string; children: ReactNode[] }) {
-  if (children.length === 0) return <p className="text-sm text-muted">{empty}</p>;
+function DataTable({ headers, empty, children }: { headers: string[]; empty: string; children: ReactNode[] }) {
+  if (children.length === 0) return <p className="text-sm text-kumo-subtle">{empty}</p>;
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr>
+      <Table>
+        <Table.Header>
+          <Table.Row>
             {headers.map((header) => (
-              <th key={header} scope="col" className="border-b border-line px-2 py-2 text-left text-xs font-semibold whitespace-nowrap text-muted">
-                {header}
-              </th>
+              <Table.Head key={header}>{header}</Table.Head>
             ))}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>{children}</Table.Body>
+      </Table>
     </div>
   );
 }
-
-const cell = "border-b border-line px-2 py-2.5 align-top";
 
 function probeSummary(probe: Overview["probe"]): string {
   if (!probe.configured) return "Health probe is not configured. Set the Graph variables and a canary mailbox to enable it.";
@@ -92,18 +96,18 @@ function FailoverCard({ overview }: { overview: Overview }) {
   return (
     <Card>
       <div className="flex flex-wrap items-center gap-3">
-        <span className="font-display text-4xl leading-none uppercase">{STATE_LABEL[overview.state]}</span>
-        <span className="text-muted">{overview.domain}</span>
-        <Pill tone="neutral">DNS: {overview.dnsMode}</Pill>
+        <Stencil className="text-5xl">{STATE_LABEL[overview.state]}</Stencil>
+        <span className="text-kumo-subtle">{overview.domain}</span>
+        <Badge variant="outline">DNS: {overview.dnsMode}</Badge>
       </div>
       <div className="mt-3 grid gap-3">
         {overview.probe.status === "degraded" ? (
           <Notice kind="warn">{probeSummary(overview.probe)}</Notice>
         ) : (
-          <p className="text-sm text-muted">{probeSummary(overview.probe)}</p>
+          <p className="text-sm text-kumo-subtle">{probeSummary(overview.probe)}</p>
         )}
         {incident && overview.state !== "standby" && (
-          <p className="text-sm text-muted">
+          <p className="text-sm text-kumo-subtle">
             Incident started {fullDate(incident.started_at)} by {incident.started_by}
             {incident.reason && `: ${incident.reason}`}
           </p>
@@ -112,18 +116,16 @@ function FailoverCard({ overview }: { overview: Overview }) {
         {deactivate.isError && <Notice kind="error">{messageOf(deactivate.error)}</Notice>}
         {overview.state === "active" ? (
           <div>
-            <Button variant="primary" onClick={end} busy={deactivate.isPending}>
+            <Button variant="primary" onClick={end} loading={deactivate.isPending}>
               End outage and sync mail back
             </Button>
           </div>
         ) : (
           <form onSubmit={declare} className="flex flex-wrap items-end gap-3">
             <div className="min-w-56 flex-1">
-              <Field label="Reason" htmlFor="reason">
-                <Input id="reason" placeholder="For example: Exchange Online outage, incident EX123456" value={reason} onChange={(e) => setReason(e.target.value)} />
-              </Field>
+              <Input id="reason" label="Reason" className="w-full" placeholder="For example: Exchange Online outage, incident EX123456" value={reason} onChange={(e) => setReason(e.target.value)} />
             </div>
-            <Button type="submit" variant="danger" busy={activate.isPending}>
+            <Button type="submit" variant="destructive" loading={activate.isPending}>
               Declare outage
             </Button>
           </form>
@@ -147,10 +149,10 @@ function FailoverCard({ overview }: { overview: Overview }) {
 
 function Stat({ value, label }: { value: string | number; label: string }) {
   return (
-    <div className="rounded-xl border border-line bg-surface p-4">
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
-      <div className="text-[13px] text-muted">{label}</div>
-    </div>
+    <Surface className="rounded-xl p-4">
+      <Stencil className="text-4xl tabular-nums">{value}</Stencil>
+      <div className="mt-1 text-[13px] text-kumo-subtle">{label}</div>
+    </Surface>
   );
 }
 
@@ -160,7 +162,7 @@ function SyncCard({ overview }: { overview: Overview }) {
   return (
     <Card title="Sync-back">
       <div className="grid gap-3">
-        <p className="text-sm text-muted">
+        <p className="text-sm text-kumo-subtle">
           {overview.graphConfigured
             ? "Copies mail held by Lifeboat into Exchange Online. Runs every 5 minutes while recovering."
             : "Microsoft Graph is not configured, so mail cannot be copied back yet."}
@@ -168,12 +170,12 @@ function SyncCard({ overview }: { overview: Overview }) {
         {run.isError && <Notice kind="error">{messageOf(run.error)}</Notice>}
         {run.data?.error && <Notice kind="error">{run.data.error}</Notice>}
         {run.isSuccess && !run.data.error && (
-          <Notice kind="ok">
+          <Notice kind="info">
             Synced {run.data.synced} of {run.data.attempted} attempted. {run.data.remaining} still waiting.
           </Notice>
         )}
         <div>
-          <Button onClick={() => run.mutate(undefined)} busy={run.isPending} disabled={!overview.graphConfigured}>
+          <Button onClick={() => run.mutate(undefined)} loading={run.isPending} disabled={!overview.graphConfigured}>
             Sync a batch now
           </Button>
         </div>
@@ -184,25 +186,25 @@ function SyncCard({ overview }: { overview: Overview }) {
 
 function UserRow({ user, onInvite }: { user: AdminUser; onInvite: (user: AdminUser, send: boolean) => void }) {
   return (
-    <tr>
-      <td className={`${cell} [overflow-wrap:anywhere]`}>
+    <Table.Row>
+      <Table.Cell className="[overflow-wrap:anywhere]">
         {user.email}
-        {user.aliases.length > 0 && <div className="text-xs text-muted">Also: {user.aliases.join(", ")}</div>}
-      </td>
-      <td className={cell}>{user.displayName}</td>
-      <td className={cell}>{user.role}</td>
-      <td className={cell}>{user.enrolled ? "Password set" : "Not enrolled"}</td>
-      <td className={cell}>
+        {user.aliases.length > 0 && <div className="text-xs text-kumo-subtle">Also: {user.aliases.join(", ")}</div>}
+      </Table.Cell>
+      <Table.Cell>{user.displayName}</Table.Cell>
+      <Table.Cell>{user.role}</Table.Cell>
+      <Table.Cell>{user.enrolled ? "Password set" : "Not enrolled"}</Table.Cell>
+      <Table.Cell>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
-          <button type="button" className="text-accent underline" onClick={() => onInvite(user, false)}>
+          <button type="button" className="text-kumo-link underline" onClick={() => onInvite(user, false)}>
             New invite link
           </button>
-          <button type="button" className="text-accent underline" onClick={() => onInvite(user, true)}>
+          <button type="button" className="text-kumo-link underline" onClick={() => onInvite(user, true)}>
             Email invite
           </button>
         </div>
-      </td>
-    </tr>
+      </Table.Cell>
+    </Table.Row>
   );
 }
 
@@ -244,7 +246,7 @@ function UsersCard({ overview }: { overview: Overview }) {
     <Card
       title="Users"
       action={
-        <Button onClick={() => directory.mutate(undefined)} busy={directory.isPending} disabled={!overview.graphConfigured} title={overview.graphConfigured ? undefined : "Configure Microsoft Graph to enable this"}>
+        <Button onClick={() => directory.mutate(undefined)} loading={directory.isPending} disabled={!overview.graphConfigured} title={overview.graphConfigured ? undefined : "Configure Microsoft Graph to enable this"}>
           Import from Microsoft 365
         </Button>
       }
@@ -252,7 +254,7 @@ function UsersCard({ overview }: { overview: Overview }) {
       <div className="grid gap-3">
         {directory.isError && <Notice kind="error">{messageOf(directory.error)}</Notice>}
         {directory.isSuccess && (
-          <Notice kind="ok">
+          <Notice kind="info">
             Directory import finished: {directory.data.found} mailboxes found, {directory.data.created} new users added.
           </Notice>
         )}
@@ -260,40 +262,31 @@ function UsersCard({ overview }: { overview: Overview }) {
         {invite.isError && <Notice kind="error">{messageOf(invite.error)}</Notice>}
         {failed && <Notice kind="error">The invite email could not be sent. Pass the link below on yourself.</Notice>}
         {issued && (
-          <Notice kind="ok">
+          <Notice kind="info">
             {issued.sent ? `Invite emailed to ${issued.email}. ` : `Invite link for ${issued.email}. Send it through a channel you trust. `}
             It is valid for 14 days.
-            <code className="mt-2 block rounded bg-surface p-2 text-xs text-ink [overflow-wrap:anywhere]">{issued.link}</code>
+            <code className="mt-2 block rounded bg-kumo-control p-2 text-xs text-kumo-default [overflow-wrap:anywhere]">{issued.link}</code>
           </Notice>
         )}
         {users.isPending && <Spinner label="Loading users" />}
         {users.isSuccess && (
-          <Table headers={["Email", "Name", "Role", "Status", "Invite"]} empty="No users yet. Add one below.">
+          <DataTable headers={["Email", "Name", "Role", "Status", "Invite"]} empty="No users yet. Add one below.">
             {users.data.users.map((user) => (
               <UserRow key={user.id} user={user} onInvite={sendInvite} />
             ))}
-          </Table>
+          </DataTable>
         )}
         <form onSubmit={add} className="flex flex-wrap items-end gap-3 pt-1">
           <div className="min-w-48 flex-[2]">
-            <Field label="Email address" htmlFor="new-email">
-              <Input id="new-email" type="email" required placeholder={`name@${overview.domain}`} value={email} onChange={(e) => setEmail(e.target.value)} />
-            </Field>
+            <Input id="new-email" label="Email address" className="w-full" type="email" required placeholder={`name@${overview.domain}`} value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div className="min-w-40 flex-[2]">
-            <Field label="Name" htmlFor="new-name">
-              <Input id="new-name" value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
+            <Input id="new-name" label="Name" className="w-full" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="min-w-28 flex-1">
-            <Field label="Role" htmlFor="new-role">
-              <select id="new-role" value={role} onChange={(e) => setRole(e.target.value)} className="w-full rounded-md border border-line bg-surface px-3 py-2 text-sm">
-                <option value="user">User</option>
-                <option value="admin">Admin</option>
-              </select>
-            </Field>
+            <Select id="new-role" label="Role" className="w-full" value={role} onValueChange={(value) => setRole(value ?? "user")} items={{ user: "User", admin: "Admin" }} />
           </div>
-          <Button type="submit" busy={create.isPending}>
+          <Button type="submit" loading={create.isPending}>
             Add user
           </Button>
         </form>
@@ -312,30 +305,31 @@ function HeldRow({ message }: { message: MessageSummary }) {
   }
 
   return (
-    <tr>
-      <td className={`${cell} [overflow-wrap:anywhere]`}>{message.rcptTo}</td>
-      <td className={`${cell} [overflow-wrap:anywhere]`}>{message.from.address}</td>
-      <td className={`${cell} [overflow-wrap:anywhere]`}>{message.subject || "(no subject)"}</td>
-      <td className={`${cell} whitespace-nowrap`}>{shortDate(message.date)}</td>
-      <td className={cell}>
+    <Table.Row>
+      <Table.Cell className="[overflow-wrap:anywhere]">{message.rcptTo}</Table.Cell>
+      <Table.Cell className="[overflow-wrap:anywhere]">{message.from.address}</Table.Cell>
+      <Table.Cell className="[overflow-wrap:anywhere]">{message.subject || "(no subject)"}</Table.Cell>
+      <Table.Cell className="whitespace-nowrap">{shortDate(message.date)}</Table.Cell>
+      <Table.Cell>
         <form onSubmit={submit} className="flex gap-2">
           <Input
             id={`assign-${message.id}`}
             type="email"
             required
             aria-label={`Assign the message for ${message.rcptTo} to a user`}
+            size="sm"
             placeholder="user's email address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="min-w-44"
           />
-          <Button type="submit" busy={assign.isPending}>
+          <Button type="submit" size="sm" loading={assign.isPending}>
             Assign
           </Button>
         </form>
-        {assign.isError && <p className="mt-1 text-xs text-danger">{messageOf(assign.error)}</p>}
-      </td>
-    </tr>
+        {assign.isError && <p className="mt-1 text-xs text-kumo-danger">{messageOf(assign.error)}</p>}
+      </Table.Cell>
+    </Table.Row>
   );
 }
 
@@ -344,14 +338,14 @@ function HeldCard() {
 
   return (
     <Card title="Held mail">
-      <p className="mb-3 text-sm text-muted">Mail for addresses that match no user. Assign it to deliver it to that user's inbox.</p>
+      <p className="mb-3 text-sm text-kumo-subtle">Mail for addresses that match no user. Assign it to deliver it to that user's inbox.</p>
       {held.isPending && <Spinner label="Loading held mail" />}
       {held.isSuccess && (
-        <Table headers={["Sent to", "From", "Subject", "Received", "Assign to"]} empty="No held mail.">
+        <DataTable headers={["Sent to", "From", "Subject", "Received", "Assign to"]} empty="No held mail.">
           {held.data.messages.map((message) => (
             <HeldRow key={message.id} message={message} />
           ))}
-        </Table>
+        </DataTable>
       )}
     </Card>
   );
@@ -364,16 +358,16 @@ function AuditCard() {
     <Card title="Audit log">
       {audit.isPending && <Spinner label="Loading audit log" />}
       {audit.isSuccess && (
-        <Table headers={["When", "Who", "Action", "Detail"]} empty="Nothing recorded yet.">
+        <DataTable headers={["When", "Who", "Action", "Detail"]} empty="Nothing recorded yet.">
           {audit.data.entries.map((entry) => (
-            <tr key={entry.id}>
-              <td className={`${cell} whitespace-nowrap`}>{fullDate(entry.at)}</td>
-              <td className={`${cell} [overflow-wrap:anywhere]`}>{entry.actor}</td>
-              <td className={cell}>{entry.action}</td>
-              <td className={`${cell} text-[13px] [overflow-wrap:anywhere]`}>{entry.detail}</td>
-            </tr>
+            <Table.Row key={entry.id}>
+              <Table.Cell className="whitespace-nowrap">{fullDate(entry.at)}</Table.Cell>
+              <Table.Cell className="[overflow-wrap:anywhere]">{entry.actor}</Table.Cell>
+              <Table.Cell>{entry.action}</Table.Cell>
+              <Table.Cell className="text-[13px] [overflow-wrap:anywhere]">{entry.detail}</Table.Cell>
+            </Table.Row>
           ))}
-        </Table>
+        </DataTable>
       )}
     </Card>
   );
@@ -400,7 +394,9 @@ export function AdminPage() {
   return (
     <div className="min-h-0 w-full overflow-y-auto">
       <div className="mx-auto grid max-w-5xl gap-4 p-4 md:p-8">
-        <h1 className="text-xl font-semibold">Continuity control</h1>
+        <h1>
+          <Stencil className="text-4xl">Continuity control</Stencil>
+        </h1>
         <FailoverCard overview={data} />
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Stat value={`${data.users.enrolled} / ${data.users.total}`} label="users enrolled" />

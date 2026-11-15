@@ -1,64 +1,104 @@
+@source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
 
-/* Palette: sea fog and deep navy with the international orange that lifeboats are painted. */
-:root {
-  --canvas: #eef2f5;
-  --surface: #ffffff;
-  --sunken: #f5f8fa;
-  --ink: #0f2233;
-  --muted: #566a7b;
-  --line: #d5dee5;
-  --accent: #d9430b;
-  --accent-ink: #ffffff;
-  --accent-soft: #fdebe3;
-  --ok: #17694a;
-  --ok-soft: #e2f3ec;
-  --warn: #8a5300;
-  --warn-soft: #fbf0d6;
-  --danger: #b3261e;
-  --danger-soft: #fbe6e4;
-  color-scheme: light;
+/*
+ * The Lifeboat theme for Kumo.
+ *
+ * Kumo components read semantic colour tokens. This file re-points those tokens at a small maritime
+ * palette: sea fog for the deck, deep navy for the hull, and the international orange that
+ * lifeboats are painted. `data-mode` on <html> selects day or night; an element can also set
+ * `data-mode="dark"` itself, which is how the sidebar stays a navy hull in both.
+ */
+/*
+ * These rules sit outside any cascade layer and name :root, so that they outrank Kumo's own
+ * defaults wherever Kumo declares them.
+ */
+:root[data-theme="lifeboat"] {
+  --text-color-kumo-default: #0f2233;
+  --text-color-kumo-strong: #081520;
+  --text-color-kumo-subtle: #4c6072;
+  --text-color-kumo-inactive: #a9b8c4;
+  --text-color-kumo-placeholder: #7f92a2;
+  --text-color-kumo-inverse: #f4f8fa;
+  --text-color-kumo-brand: #c93d08;
+  --text-color-kumo-link: #0b4f8a;
+  --text-color-kumo-info: #0b4f8a;
+  --text-color-kumo-success: #17694a;
+  --text-color-kumo-danger: #b3261e;
+  --text-color-kumo-warning: #8a5300;
+  --color-kumo-canvas: #e9eef1;
+  --color-kumo-recessed: #dfe7ec;
+  --color-kumo-elevated: #f4f8fa;
+  --color-kumo-base: #fbfcfd;
+  --color-kumo-overlay: #f4f8fa;
+  --color-kumo-control: #ffffff;
+  --color-kumo-tint: #e3eaef;
+  --color-kumo-fill: #d5dfe6;
+  --color-kumo-fill-hover: #e3eaef;
+  --color-kumo-interact: #b7c6d1;
+  --color-kumo-contrast: #0f2233;
+  --color-kumo-brand: #d9430b;
+  --color-kumo-brand-hover: #b93708;
+  --color-kumo-line: rgb(15 34 51 / 0.14);
+  --color-kumo-hairline: #d5dfe6;
+  --color-kumo-focus: #d9430b;
+  --color-kumo-info-tint: rgb(11 79 138 / 0.1);
+  --color-kumo-success-tint: rgb(23 105 74 / 0.12);
+  --color-kumo-warning-tint: rgb(196 127 0 / 0.16);
+  --color-kumo-danger-tint: rgb(179 38 30 / 0.1);
+  --color-kumo-banner-info: rgb(11 79 138 / 0.1);
+  --color-kumo-banner-warning: rgb(196 127 0 / 0.16);
+  /* Lifeboat's own tokens, for the few places Kumo has no equivalent. */
+  --color-lifeboat-wash: rgb(217 67 11 / 0.1);
+  --color-lifeboat-tape: #ffffff;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --canvas: #0b1824;
-    --surface: #11222f;
-    --sunken: #0e1d29;
-    --ink: #e8eef2;
-    --muted: #9db0bf;
-    --line: #25394b;
-    --accent: #ff6a2b;
-    --accent-ink: #1a0d05;
-    --accent-soft: #3a1c0d;
-    --ok: #6fd3a7;
-    --ok-soft: #123226;
-    --warn: #f2c165;
-    --warn-soft: #382a0d;
-    --danger: #ff8f87;
-    --danger-soft: #3f1a1a;
-    color-scheme: dark;
-  }
+:root[data-theme="lifeboat"][data-mode="dark"],
+:root[data-theme="lifeboat"] [data-mode="dark"] {
+  --text-color-kumo-default: #e8eef2;
+  --text-color-kumo-strong: #ffffff;
+  --text-color-kumo-subtle: #9db0bf;
+  --text-color-kumo-inactive: #4f6679;
+  --text-color-kumo-placeholder: #7890a2;
+  --text-color-kumo-inverse: #0f2233;
+  --text-color-kumo-brand: #ff7d45;
+  --text-color-kumo-link: #8cc4f5;
+  --text-color-kumo-info: #8cc4f5;
+  --text-color-kumo-success: #6fd3a7;
+  --text-color-kumo-danger: #ff8f87;
+  --text-color-kumo-warning: #f2c165;
+  --color-kumo-canvas: #081520;
+  --color-kumo-recessed: #06101a;
+  --color-kumo-elevated: #13293c;
+  --color-kumo-base: #0f2233;
+  --color-kumo-overlay: #13293c;
+  --color-kumo-control: #0b1b29;
+  --color-kumo-tint: #173247;
+  --color-kumo-fill: #1d3b52;
+  --color-kumo-fill-hover: #173247;
+  --color-kumo-interact: #34566f;
+  --color-kumo-contrast: #f4f8fa;
+  --color-kumo-brand: #d9430b;
+  --color-kumo-brand-hover: #f0541a;
+  --color-kumo-line: rgb(232 238 242 / 0.14);
+  --color-kumo-hairline: #1d3b52;
+  --color-kumo-focus: #ff7d45;
+  --color-kumo-info-tint: rgb(140 196 245 / 0.14);
+  --color-kumo-success-tint: rgb(111 211 167 / 0.14);
+  --color-kumo-warning-tint: rgb(242 193 101 / 0.16);
+  --color-kumo-danger-tint: rgb(255 143 135 / 0.16);
+  --color-kumo-banner-info: rgb(140 196 245 / 0.14);
+  --color-kumo-banner-warning: rgb(242 193 101 / 0.16);
+  --color-lifeboat-wash: rgb(255 125 69 / 0.16);
+  --color-lifeboat-tape: #0f2233;
+  color: var(--text-color-kumo-default);
 }
 
 @theme inline {
-  --color-canvas: var(--canvas);
-  --color-surface: var(--surface);
-  --color-sunken: var(--sunken);
-  --color-ink: var(--ink);
-  --color-muted: var(--muted);
-  --color-line: var(--line);
-  --color-accent: var(--accent);
-  --color-accent-ink: var(--accent-ink);
-  --color-accent-soft: var(--accent-soft);
-  --color-ok: var(--ok);
-  --color-ok-soft: var(--ok-soft);
-  --color-warn: var(--warn);
-  --color-warn-soft: var(--warn-soft);
-  --color-danger: var(--danger);
-  --color-danger-soft: var(--danger-soft);
   --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+  --color-lifeboat-wash: var(--color-lifeboat-wash);
 }
 
 html,
@@ -69,20 +109,21 @@ body,
 
 body {
   margin: 0;
-  background: var(--canvas);
-  color: var(--ink);
+  background: var(--color-kumo-canvas);
+  color: var(--text-color-kumo-default);
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.5;
 }
 
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-dialog::backdrop {
-  background: rgb(8 18 28 / 0.55);
+/* The diagonal reflective tape a lifeboat carries, used to mark the outage banner. */
+.reflective-tape {
+  height: 6px;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--color-kumo-brand) 0 14px,
+    var(--color-lifeboat-tape) 14px 28px
+  );
 }
 
 @media (prefers-reduced-motion: reduce) {

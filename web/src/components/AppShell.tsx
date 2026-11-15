@@ -1,11 +1,11 @@
-import { Inbox, LogOut, PenSquare, Send, ShieldCheck } from "lucide-react";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Tooltip } from "@cloudflare/kumo/components/tooltip";
+import { PaperPlaneTiltIcon, PencilSimpleLineIcon, ShieldCheckIcon, SignOutIcon, TrayIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useLogout } from "../api/queries";
 import type { Session } from "../api/schemas";
 import { hrefFor, navigate, type Route } from "../lib/router";
-import { Brand, Button, Pill, cx } from "./ui";
-
-const STATE_LABEL = { standby: "Standby", active: "Outage mode", recovering: "Recovering" };
+import { Brand, StateBadge, cx } from "./ui";
 
 const BANNER = {
   standby: null,
@@ -27,8 +27,8 @@ function NavItem({ route, current, icon, label, count = 0 }: NavItemProps) {
       href={hrefFor(route)}
       aria-current={current ? "page" : undefined}
       className={cx(
-        "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm no-underline",
-        current ? "bg-accent-soft font-semibold text-accent" : "text-ink hover:bg-sunken",
+        "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm no-underline",
+        current ? "bg-kumo-brand font-semibold text-white" : "text-kumo-default hover:bg-kumo-tint",
       )}
     >
       {icon}
@@ -46,53 +46,53 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-/** The frame around every signed-in view: navigation, the outage banner, and the account controls. */
+/** The frame around every signed-in view: the hull-coloured navigation, the outage banner, and the account controls. */
 export function AppShell({ session, route, unread, onCompose, children }: AppShellProps) {
   const logout = useLogout();
   const banner = BANNER[session.state];
   const folder = route.name === "mail" ? route.folder : null;
-  const icon = "size-[18px] shrink-0";
 
   function signOut() {
     logout.mutate(undefined, { onSettled: () => navigate({ name: "login" }) });
   }
 
+  const signOutButton = (
+    <Tooltip content="Sign out" render={<Button variant="ghost" shape="square" icon={<SignOutIcon />} onClick={signOut} aria-label="Sign out" />} />
+  );
+
   return (
     <div className="flex h-full flex-col">
       {banner && (
-        <div role="status" className={cx("px-4 py-2 text-sm", session.state === "active" ? "bg-danger-soft text-danger" : "bg-warn-soft text-warn")}>
-          {banner}
+        <div role="status" className={session.state === "active" ? "bg-kumo-danger-tint text-kumo-danger" : "bg-kumo-warning-tint text-kumo-warning"}>
+          {session.state === "active" && <div className="reflective-tape" aria-hidden="true" />}
+          <p className="m-0 px-4 py-2 text-sm font-medium">{banner}</p>
         </div>
       )}
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <aside className="flex shrink-0 flex-col gap-3 border-line bg-surface p-3 max-md:border-b md:w-64 md:border-r md:p-4">
-          <div className="flex items-center gap-3">
+        {/* The sidebar is the hull: it stays navy in day and night modes. */}
+        <aside data-mode="dark" className="flex shrink-0 flex-col gap-3 bg-kumo-base p-3 md:w-72 md:p-4">
+          <div className="flex items-center gap-2">
             <Brand />
             <span className="flex-1" />
-            <Pill tone={session.state}>{STATE_LABEL[session.state]}</Pill>
-            <Button variant="ghost" onClick={signOut} aria-label="Sign out" title="Sign out" className="px-2 md:hidden">
-              <LogOut className="size-4" aria-hidden="true" />
-            </Button>
+            <StateBadge state={session.state} />
+            <span className="md:hidden">{signOutButton}</span>
           </div>
-          <Button variant="primary" onClick={onCompose} className="md:mt-2">
-            <PenSquare className="size-4" aria-hidden="true" />
+          <Button variant="primary" icon={<PencilSimpleLineIcon />} onClick={onCompose} className="w-full justify-center md:mt-2">
             New message
           </Button>
           <nav aria-label="Mailbox" className="flex gap-1 md:flex-col">
-            <NavItem route={{ name: "mail", folder: "inbox", messageId: null }} current={folder === "inbox"} icon={<Inbox className={icon} aria-hidden="true" />} label="Inbox" count={unread} />
-            <NavItem route={{ name: "mail", folder: "sent", messageId: null }} current={folder === "sent"} icon={<Send className={icon} aria-hidden="true" />} label="Sent" />
+            <NavItem route={{ name: "mail", folder: "inbox", messageId: null }} current={folder === "inbox"} icon={<TrayIcon size={18} aria-hidden="true" />} label="Inbox" count={unread} />
+            <NavItem route={{ name: "mail", folder: "sent", messageId: null }} current={folder === "sent"} icon={<PaperPlaneTiltIcon size={18} aria-hidden="true" />} label="Sent" />
             {session.user.role === "admin" && (
-              <NavItem route={{ name: "admin" }} current={route.name === "admin"} icon={<ShieldCheck className={icon} aria-hidden="true" />} label="Admin" />
+              <NavItem route={{ name: "admin" }} current={route.name === "admin"} icon={<ShieldCheckIcon size={18} aria-hidden="true" />} label="Admin" />
             )}
           </nav>
-          <div className="mt-auto flex items-center gap-2 border-t border-line pt-3 max-md:hidden">
+          <div className="mt-auto flex items-center gap-2 border-t border-kumo-line pt-3 max-md:hidden">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold">{session.user.displayName || session.user.email}</div>
-              <div className="truncate text-xs text-muted">{session.user.email}</div>
+              <div className="truncate text-xs text-kumo-subtle">{session.user.email}</div>
             </div>
-            <Button variant="ghost" onClick={signOut} aria-label="Sign out" title="Sign out" className="px-2">
-              <LogOut className="size-4" aria-hidden="true" />
-            </Button>
+            {signOutButton}
           </div>
         </aside>
         <main className="flex min-h-0 min-w-0 flex-1">{children}</main>

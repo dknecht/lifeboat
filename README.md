@@ -113,7 +113,7 @@ The application is a set of Effect programs that depend on four services: `Db` (
 - `src/worker.ts` is the only file that touches the platform. It declares the resources, builds the services from the Worker's bindings, and connects fetch, email, and cron events to the entry points.
 - `src/errors.ts` lists every way an operation can fail as a tagged error. The API turns them into responses in one place (`handleApi` in `src/api.ts`); an inbound storage failure is left to fail the event so that the sending server retries.
 - The tests run the same entry points against local D1 and R2 with a recording mailer, so they exercise the real code paths without the Alchemy runtime.
-- `web/` is the browser client: React, Tailwind, and TanStack Query, built by Vite into `dist/`, which the Worker serves. Every API response is decoded with a schema before the interface uses it. `npm run dev` builds it once; for hot reload while working on the interface, run `npm run dev:web` beside it and open the address Vite prints.
+- `web/` is the browser client: React, Cloudflare's [Kumo](https://github.com/cloudflare/kumo) components, Tailwind, and TanStack Query, built by Vite into `dist/`, which the Worker serves. The Lifeboat look is a Kumo theme: `web/src/styles.css` re-points Kumo's colour tokens at a maritime palette for day and night modes. Every API response is decoded with a schema before the interface uses it. `npm run dev` builds it once; for hot reload while working on the interface, run `npm run dev:web` beside it and open the address Vite prints.
 
 ## What is and is not verified
 
