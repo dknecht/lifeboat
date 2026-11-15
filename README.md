@@ -107,7 +107,22 @@ Anyone who signs in with a Lifeboat password can add passkeys on the Account pag
 
 **Access must be able to sign people in without Microsoft.** If Entra ID is the only identity provider configured in Access, an Entra outage locks people out of Lifeboat. Access's one-time PIN does not help either: the code is emailed to the work address, which is the mailbox the person is trying to reach.
 
-To set it up:
+### Let the deploy create it
+
+For `access` mode the deploy can do the Access setup for you. Give it an allow-list and it puts an Access application in front of the Worker and another in front of the landing page:
+
+```sh
+AUTH_MODE=access
+ACCESS_ALLOW_EMAILS=someone@example.org
+ACCESS_ALLOW_DOMAINS=example.com
+ACCESS_ADMIN_EMAILS=someone@example.org
+```
+
+Access is then attached to the Worker itself, so Cloudflare verifies each person before the Worker runs and Lifeboat takes the address from that. `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are not needed. The applications use whatever login methods your Zero Trust organisation has; check that one of them does not depend on Microsoft.
+
+### Set it up yourself
+
+Use this for `both` mode, or when you want to manage the Access application outside the deploy.
 
 1. In Zero Trust, create a self-hosted Access application.
    - For `access`, cover the whole Lifeboat hostname.
@@ -119,7 +134,7 @@ To set it up:
 
 How it behaves:
 
-- The Worker verifies the token Access attaches to each request against your team's published keys, and checks the audience, issuer, and expiry. In `local` mode the header is ignored.
+- When the deploy attached Access to the Worker, Lifeboat trusts the address Cloudflare verified. Otherwise the Worker verifies the token Access attaches to each request against your team's published keys, and checks the audience, issuer, and expiry. In `local` mode the header is ignored.
 - Someone Access lets in who has no Lifeboat account gets one automatically if their address is in `MAIL_DOMAIN`. Anyone else is refused unless they are a listed administrator.
 - In `access` mode there are no Lifeboat passwords, sessions, or invites.
 - In `both` mode an administrator signs in with a password to read mail, then passes through Access to open the console.
@@ -178,9 +193,9 @@ Verified locally (automated tests in the Workers runtime, plus a browser run aga
 
 Not yet verified against live services:
 
-- **`npm run deploy`.** The stack type-checks and runs locally, but it has not been deployed to a Cloudflare account.
+- **Mail flow on a deployed instance.** `npm run deploy` has created the database, bucket, Workers, cron trigger, and Access applications in a real account. No domain has been pointed at it, so receiving, sending, and sync-back have not run there.
 - **Sync-back against a real tenant.** Creating a message as a delivered (non-draft) item relies on setting the `PidTagMessageFlags` extended property at creation. This is widely used but not documented by Microsoft.
-- **Cloudflare Access sign-in against a real Access application.** Token verification is tested with locally generated keys, and the prompts are checked in a browser, but the round trip through Access has not been run. In particular, confirm in `both` mode that the Access cookie set for `/api/admin` is sent on the console's background requests.
+- **Signing in through Cloudflare Access.** A deployment created with an allow-list has been checked from the outside: anonymous requests to the app, its API, and the landing page are redirected to the Access sign-in. Nobody has yet signed in through it, so the step where Lifeboat picks up the verified address is unproven. `both` mode, with a path-scoped application and token verification in the Worker, has only been tested with locally generated keys.
 - **`DNS_MODE=api`.** The Email Routing API calls were written from the API reference and have not been run against a live zone. Use `manual` until you have drilled it.
 - **Email Sending in production,** including how quickly a new sending domain's daily quota grows. Check the quota before you rely on it for a whole company.
 

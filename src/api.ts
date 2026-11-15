@@ -48,7 +48,7 @@ import {
   listPasskeys,
 } from "./passkeys";
 import { SendInput, sendMessage } from "./outbound";
-import { AppConfig, Blobs, Db, Mailer, sql, type AppServices } from "./services";
+import { AppConfig, Blobs, Db, EdgeIdentity, Mailer, sql, type AppServices } from "./services";
 import { audit, getState } from "./settings";
 import { finishRecoveryIfDrained, runSyncBatch } from "./sync";
 import { decodePeople, type AttachmentRow, type MessageRow, type StoredBody, type UserRow } from "./types";
@@ -116,10 +116,24 @@ const userFromAccess = Effect.fn("userFromAccess")(function* (email: string) {
 /** Resolves an identity from the Access token on the request, or null if there is none worth trusting. */
 const actorFromAccess = Effect.fn("actorFromAccess")(function* (request: Request) {
   const config = yield* AppConfig;
+
+  // In local mode Access is ignored entirely, so it cannot be used to claim an identity.
+  if (config.authMode === "local") return null;
+
+  // When Access is attached to the Worker, Cloudflare has verified the person before the Worker runs.
+  const { accessEmail } = yield* EdgeIdentity;
+
+  if (accessEmail) {
+    const verified = yield* userFromAccess(accessEmail);
+    const admitted: Actor | null = verified ? { kind: "user", user: verified, via: "access" } : null;
+
+    return admitted;
+  }
+
+  // Otherwise the request must carry an Access token, which Lifeboat checks itself.
   const token = request.headers.get(ACCESS_HEADER);
 
-  // In local mode the header is ignored entirely, so it cannot be used to claim an identity.
-  if (!token || config.authMode === "local") return null;
+  if (!token) return null;
 
   const identity = yield* verifyAccessToken(token).pipe(
     Effect.tapError((error) => Effect.logWarning(`Access token refused: ${error.reason}`)),

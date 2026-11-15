@@ -183,7 +183,7 @@ A user with a local account can register WebAuthn passkeys and sign in with one 
 - **`access`**: Cloudflare Access protects the whole hostname and is the only way in. Lifeboat has no passwords, sessions, or invites in this mode.
 - **`both`**: users keep local passwords for mail, and Access protects the admin path. A local session is not enough to reach an admin route.
 
-The Worker verifies the `Cf-Access-Jwt-Assertion` token itself (RS256 signature against the team's published keys, audience, issuer, expiry) and maps the email claim to a user by any of their addresses. A person with no account is created on arrival if their address is in the mail domain or they are a listed administrator. Listed service tokens act as automation. In `local` mode the header is ignored.
+When the deploy is given an allow-list (`ACCESS_ALLOW_EMAILS`, `ACCESS_ALLOW_DOMAINS`), it creates the Access applications and attaches Access to the Worker; Cloudflare then verifies each person before the Worker runs, and Lifeboat reads the verified address from the request context. Without that, the Worker verifies the `Cf-Access-Jwt-Assertion` token itself (RS256 signature against the team's published keys, audience, issuer, expiry) and maps the email claim to a user by any of their addresses. A person with no account is created on arrival if their address is in the mail domain or they are a listed administrator. Listed service tokens act as automation. In `local` mode the header is ignored.
 
 Access only helps if it can authenticate people without Microsoft. It needs an identity provider other than Entra ID, and its emailed one-time PIN is no use when the destination is the mailbox that is down.
 
@@ -278,6 +278,7 @@ lifeboat/
 │   ├── api.ts          HTTP router and handlers
 │   ├── auth.ts         password hashing, sessions, invites
 │   ├── access.ts       Cloudflare Access token verification
+│   ├── gate.ts         the Access applications a deploy can create
 │   ├── passkeys.ts     WebAuthn registration and sign-in
 │   ├── drafts.ts       unsent messages
 │   ├── directory.ts    scheduled import of users from Microsoft 365

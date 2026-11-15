@@ -220,7 +220,20 @@ export function makeMailer(binding: SendEmailBinding): MailSender {
 
 // ── Assembly ─────────────────────────────────────────────────────────────────
 
-export type AppServices = AppConfig | Db | Blobs | Mailer;
+// ── Identity established by the platform ─────────────────────────────────────
+
+/**
+ * Who Cloudflare Access says is making this request, when Access is attached to the Worker itself.
+ * Cloudflare has already verified the person by the time the Worker runs, so the address is trusted
+ * as given. It is null when the request did not come through Access that way.
+ */
+export interface EdgeIdentityValue {
+  readonly accessEmail: string | null;
+}
+
+export class EdgeIdentity extends Context.Service<EdgeIdentity, EdgeIdentityValue>()("lifeboat/EdgeIdentity") {}
+
+export type AppServices = AppConfig | Db | Blobs | Mailer | EdgeIdentity;
 
 /** The raw Cloudflare bindings the application runs on. */
 export interface RawBindings {
@@ -228,6 +241,8 @@ export interface RawBindings {
   readonly bucket: R2Bucket;
   readonly email: SendEmailBinding;
   readonly vars: EnvironmentValues;
+  /** The address Cloudflare Access verified for this request, if Access is attached to the Worker. */
+  readonly accessEmail?: string | null;
 }
 
 export const appLayer = (raw: RawBindings): Layer.Layer<AppServices> =>
@@ -236,4 +251,5 @@ export const appLayer = (raw: RawBindings): Layer.Layer<AppServices> =>
     Layer.succeed(Db, makeDb(raw.db)),
     Layer.succeed(Blobs, makeBlobs(raw.bucket)),
     Layer.succeed(Mailer, makeMailer(raw.email)),
+    Layer.succeed(EdgeIdentity, { accessEmail: raw.accessEmail?.toLowerCase() ?? null }),
   );

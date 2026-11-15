@@ -15,6 +15,7 @@ import * as Redacted from "effect/Redacted";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { handleInbound, handleRequest, handleScheduled } from "./app";
+import { gateFor } from "./gate";
 import { appLayer, type AppServices } from "./services";
 
 /** Message index, users, sessions, incidents. Pending migrations are applied on every deploy. */
@@ -79,18 +80,25 @@ const settings = Config.all({
   CF_API_TOKEN: secret("CF_API_TOKEN"),
 });
 
+const workerProps: Cloudflare.WorkerProps = {
+  main: import.meta.url,
+  compatibility: { date: "2026-11-01" },
+  assets: {
+    // Built from web/ by `npm run build:web`.
+    directory: "./dist",
+    notFoundHandling: "single-page-application",
+    runWorkerFirst: ["/api/*"],
+  },
+};
+
+// With an allow-list configured, Cloudflare Access stands in front of the whole Worker.
+const gate = gateFor("Lifeboat");
+
+if (gate) workerProps.access = gate;
+
 export default Cloudflare.Worker(
   "Worker",
-  {
-    main: import.meta.url,
-    compatibility: { date: "2026-11-01" },
-    assets: {
-      // Built from web/ by `npm run build:web`.
-      directory: "./dist",
-      notFoundHandling: "single-page-application",
-      runWorkerFirst: ["/api/*"],
-    },
-  },
+  workerProps,
   Effect.gen(function* () {
     const db = yield* Cloudflare.D1.QueryDatabase(Database);
     const bucket = yield* Cloudflare.R2.ReadWriteBucket(MailBucket);
@@ -98,7 +106,7 @@ export default Cloudflare.Worker(
     const vars = yield* settings;
 
     /** Runs an application effect with services built from this Worker's bindings. */
-    const withApp = <A, E>(effect: Effect.Effect<A, E, AppServices>) =>
+    const withApp = <A, E>(effect: Effect.Effect<A, E, AppServices>, accessEmail: string | null = null) =>
       Effect.gen(function* () {
         const sender = yield* email.raw;
 
@@ -107,6 +115,7 @@ export default Cloudflare.Worker(
           bucket: yield* bucket.raw,
           email: { send: (message) => sender.send(message) },
           vars,
+          accessEmail,
         });
 
         return yield* Effect.provide(effect, layer);
@@ -147,7 +156,11 @@ export default Cloudflare.Worker(
         const request = yield* HttpServerRequest.HttpServerRequest;
         const web = yield* HttpServerRequest.toWeb(request);
 
-        return HttpServerResponse.fromWeb(yield* withApp(handleRequest(web)));
+        // Set when Access is attached to this Worker and has already verified who is asking.
+        const access = yield* Cloudflare.Access.Context;
+        const identity = access ? yield* access.getIdentity().pipe(Effect.orElseSucceed(() => undefined)) : undefined;
+
+        return HttpServerResponse.fromWeb(yield* withApp(handleRequest(web), identity?.email ?? null));
       }).pipe(
         // Only reached when the incoming request itself cannot be read.
         Effect.catchCause(() => Effect.succeed(HttpServerResponse.text("Bad request", { status: 400 }))),

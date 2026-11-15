@@ -2,3 +2,6 @@
 interface ImportMeta {
   readonly url: string;
 }
+
+// Node's process, present while Alchemy evaluates the stack for a deploy and absent in the Worker.
+declare var process: { readonly env: { readonly [name: string]: string | undefined } } | undefined;

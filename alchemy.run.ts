@@ -10,11 +10,12 @@
 import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Alchemy from "alchemy";
 import * as Effect from "effect/Effect";
+import { gateFor } from "./src/gate.ts";
 import Worker from "./src/worker.ts";
 
 // Deploys keep their state in Cloudflare so that any machine or CI job can update the stack.
 // Local development uses a state file under .alchemy/ and needs no Cloudflare account.
-const localState = process.env.LIFEBOAT_LOCAL_STATE === "1";
+const localState = process?.env.LIFEBOAT_LOCAL_STATE === "1";
 
 export default Alchemy.Stack(
   "Lifeboat",
@@ -25,6 +26,15 @@ export default Alchemy.Stack(
   Effect.gen(function* () {
     const worker = yield* Worker;
 
-    return { url: worker.url, workerName: worker.workerName };
+    // The project's landing page: a static site, behind the same Access application when one is configured.
+    const landingProps: Cloudflare.WorkerProps = { assets: "./site" };
+
+    const gate = gateFor("Lifeboat landing page");
+
+    if (gate) landingProps.access = gate;
+
+    const landing = yield* Cloudflare.Worker("Landing", landingProps);
+
+    return { url: worker.url, workerName: worker.workerName, landingUrl: landing.url };
   }),
 );
