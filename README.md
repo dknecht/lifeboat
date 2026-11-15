@@ -132,6 +132,7 @@ How it behaves:
 | `AUTO_FAILOVER` | `false` | Declare an outage automatically after `PROBE_THRESHOLD` failed probes. |
 | `PROBE_THRESHOLD` | `3` | Consecutive probe results needed to change health status. |
 | `RETENTION_DAYS` | `30` | Days to keep a message after it has been synced. Unsynced mail is never deleted. |
+| `DIRECTORY_SYNC_HOURS` | `24` | How often users and aliases are re-imported from Microsoft 365 while in standby. `0` turns it off. The import only adds; it never removes a user. |
 | `AUTH_MODE` | `local` | `local`, `both`, or `access`. See [Sign-in with Cloudflare Access](#sign-in-with-cloudflare-access). |
 | `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` | | Your Zero Trust team domain and the Access application's audience tag. |
 | `ACCESS_ADMIN_EMAILS` | | Comma-separated administrators, when they sign in through Access. |

@@ -33,14 +33,14 @@ import {
   type GraphNotConfigured,
 } from "./errors";
 import { activate, deactivate, manualInstructions } from "./failover";
-import { getGraphToken, listDirectoryUsers } from "./graph";
+import { getLastDirectoryImport, importDirectory } from "./directory";
 import { getProbeHealth } from "./health";
 import { SendInput, sendMessage } from "./outbound";
 import { AppConfig, Blobs, Db, Mailer, sql, type AppServices } from "./services";
 import { audit, getState } from "./settings";
 import { finishRecoveryIfDrained, runSyncBatch } from "./sync";
 import { decodePeople, type AttachmentRow, type MessageRow, type StoredBody, type UserRow } from "./types";
-import { escapeLike, isValidAddress, normalizeAddress, timingSafeEqual } from "./util";
+import { escapeLike, isValidAddress, normalizeAddress, timingSafeEqual, toBase64 } from "./util";
 
 // ── Request context ──────────────────────────────────────────────────────────
 
@@ -369,6 +369,45 @@ const listMessages = (ctx: Ctx) =>
     });
   });
 
+const INLINE_IMAGE_LIMIT_BYTES = 2 * 1024 * 1024;
+const INLINE_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/**
+ * Replaces `cid:` references in an HTML body with the image data itself.
+ *
+ * The reading pane shows HTML in a sandbox that may only load `data:` images, so an inline image
+ * has to travel inside the HTML. Only common raster formats under the size limit are embedded;
+ * anything else stays a `cid:` reference, which the sandbox does not load.
+ */
+const embedInlineImages = Effect.fn("embedInlineImages")(function* (
+  messageId: string,
+  html: string,
+  attachments: ReadonlyArray<AttachmentRow>,
+) {
+  const blobs = yield* Blobs;
+  let embedded = html;
+
+  for (const attachment of attachments) {
+    const contentId = attachment.content_id?.replace(/^<|>$/g, "");
+
+    const eligible =
+      contentId &&
+      INLINE_IMAGE_TYPES.includes(attachment.content_type.toLowerCase()) &&
+      attachment.size <= INLINE_IMAGE_LIMIT_BYTES &&
+      embedded.includes(`cid:${contentId}`);
+
+    if (!eligible) continue;
+
+    const bytes = yield* blobs.getBytes(`att/${messageId}/${attachment.idx}`);
+
+    if (bytes) {
+      embedded = embedded.replaceAll(`cid:${contentId}`, `data:${attachment.content_type};base64,${toBase64(bytes)}`);
+    }
+  }
+
+  return embedded;
+});
+
 /** Loads a message's body and attachment list for display. */
 const messageDetail = Effect.fn("messageDetail")(function* (row: MessageRow) {
   const db = yield* Db;
@@ -382,7 +421,7 @@ const messageDetail = Effect.fn("messageDetail")(function* (row: MessageRow) {
   return {
     ...listItem(row),
     messageId: row.message_id,
-    body: stored,
+    body: { text: stored.text, html: stored.html ? yield* embedInlineImages(row.id, stored.html, attachments) : null },
     attachments: attachments.map((a) => ({
       idx: a.idx,
       filename: a.filename,
@@ -520,6 +559,7 @@ const overview = (ctx: Ctx) =>
       autoFailover: config.autoFailover,
       graphConfigured: config.graph !== null,
       probe: yield* getProbeHealth,
+      directory: yield* getLastDirectoryImport,
       incident,
       sync: counts,
       users: { total: users?.total ?? 0, enrolled: users?.enrolled ?? 0 },
@@ -667,18 +707,15 @@ const postDirectorySync = (ctx: Ctx) =>
   Effect.gen(function* () {
     const actor = yield* requireAdmin(ctx);
 
-    const directory = yield* getGraphToken.pipe(
-      Effect.flatMap(listDirectoryUsers),
+    const record = yield* importDirectory.pipe(
       Effect.catchTag("GraphError", (e) =>
         Effect.fail(new ApiError({ status: 502, message: `The directory could not be read: ${e.message}` })),
       ),
     );
 
-    const results = yield* Effect.forEach(directory, (entry) => createUser(entry));
-    const created = results.filter((r) => r.created).length;
-    yield* audit(actor, "directory.sync", `${directory.length} found, ${created} new`);
+    yield* audit(actor, "directory.sync", `${record.found} found, ${record.created} new`);
 
-    return json({ found: directory.length, created });
+    return json({ found: record.found, created: record.created });
   });
 
 const listHeld = (ctx: Ctx) =>

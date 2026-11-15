@@ -165,7 +165,7 @@ The email subscription is declared without a zone. Naming a zone would make Alch
 
 Entra ID cannot be relied on during a Microsoft outage, so v1 uses **local accounts enrolled in advance**:
 
-1. An admin creates users individually, in bulk, or by pulling the directory from Graph (`User.Read.All`).
+1. An admin creates users individually, or Lifeboat imports the directory from Graph (`User.Read.All`). The import repeats on a schedule while in standby, adding new mailboxes and aliases and never removing anyone.
 2. Each user gets an invite link, sent to their work mailbox while Microsoft 365 is healthy, and sets a Lifeboat password.
 3. During an outage they sign in at the Lifeboat URL with their email address and that password.
 
@@ -295,10 +295,10 @@ lifeboat/
 | **Journaling mode** | MX stays on Microsoft; a journal rule copies mail to a Lifeboat address for history. Combined with the MX flip for new mail. |
 | **Passkeys** | WebAuthn enrollment as a stronger local credential than a password. |
 | **Personal-address sign-in through Access** | Map a personal address to a work account so that Access's emailed one-time PIN can be used when the work mailbox is down. |
-| **Scheduled directory sync** | Keep users, aliases, shared mailboxes, and distribution groups current automatically. |
+| **Shared mailboxes and groups** | The scheduled directory import covers user mailboxes and their aliases. Shared mailboxes and distribution groups are not yet expanded to their members. |
 | **Calendar and contacts** | Read-only snapshot of calendars and the global address list, refreshed while healthy. |
 | **Drafts and full-text search** | Save unfinished messages. Search currently uses substring matching; D1 full-text indexing would rank results and scale further. |
-| **Inline images and safe remote content** | Rewrite `cid:` references; proxy remote images. |
+| **Remote images** | Inline images are embedded. Images hosted elsewhere stay hidden; a privacy-preserving proxy would let people choose to load them. |
 | **MIME-faithful import** | Replace the JSON rebuild in sync-back when Microsoft offers a supported MIME import. |
 | **Per-user encryption at rest** | Envelope encryption of bodies with keys derived from user credentials. |
 | **Outage notifications** | SMS or push to tell users that Lifeboat is active and where to sign in. |

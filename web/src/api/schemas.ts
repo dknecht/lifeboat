@@ -128,6 +128,8 @@ export const Overview = Schema.Struct({
   }),
   users: Schema.Struct({ total: Schema.Number, enrolled: Schema.Number }),
   held: Schema.Number,
+  /** The most recent directory import, or null if there has not been one. */
+  directory: Schema.NullOr(Schema.Struct({ at: Schema.Number, found: Schema.Number, created: Schema.Number })),
   instructions: Schema.Array(Schema.String),
 });
 

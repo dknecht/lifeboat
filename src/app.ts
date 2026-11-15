@@ -4,6 +4,7 @@
  */
 import * as Effect from "effect/Effect";
 import { handleApi } from "./api";
+import { importDirectoryIfDue } from "./directory";
 import { runProbe } from "./health";
 import { handleInbound } from "./inbound";
 import { getState } from "./settings";
@@ -11,9 +12,10 @@ import { finishRecoveryIfDrained, retentionSweep, runSyncBatch } from "./sync";
 
 export { handleApi as handleRequest, handleInbound };
 
-/** The periodic job: probe Microsoft 365, drain sync-back while recovering, and apply retention. */
+/** The periodic job: probe Microsoft 365, refresh the directory, drain sync-back while recovering, and apply retention. */
 export const handleScheduled = Effect.gen(function* () {
   yield* runProbe;
+  yield* importDirectoryIfDue;
 
   if ((yield* getState) === "recovering") {
     yield* runSyncBatch(20);

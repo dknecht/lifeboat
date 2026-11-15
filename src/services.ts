@@ -28,6 +28,8 @@ export interface Configuration {
   readonly autoFailover: boolean;
   readonly probeThreshold: number;
   readonly retentionDays: number;
+  /** How often the directory is re-imported from Microsoft 365, in hours. Zero turns the schedule off. */
+  readonly directorySyncHours: number;
   readonly adminToken: Redacted.Redacted<string> | null;
   /** Null when the Entra app registration is not fully configured. */
   readonly graph: {
@@ -57,6 +59,7 @@ export interface EnvironmentValues {
   readonly AUTO_FAILOVER?: string | undefined;
   readonly PROBE_THRESHOLD?: string | undefined;
   readonly RETENTION_DAYS?: string | undefined;
+  readonly DIRECTORY_SYNC_HOURS?: string | undefined;
   readonly GRAPH_TENANT_ID?: string | undefined;
   readonly GRAPH_CLIENT_ID?: string | undefined;
   readonly GRAPH_CANARY_MAILBOX?: string | undefined;
@@ -97,6 +100,7 @@ export function configFromEnv(env: EnvironmentValues): Configuration {
     autoFailover: env.AUTO_FAILOVER === "true",
     probeThreshold: intVar(env.PROBE_THRESHOLD, 3),
     retentionDays: intVar(env.RETENTION_DAYS, 30),
+    directorySyncHours: env.DIRECTORY_SYNC_HOURS?.trim() === "0" ? 0 : intVar(env.DIRECTORY_SYNC_HOURS, 24),
     adminToken: secretOf(env.ADMIN_TOKEN),
     graph:
       env.GRAPH_TENANT_ID && env.GRAPH_CLIENT_ID && graphSecret

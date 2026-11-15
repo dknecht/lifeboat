@@ -264,6 +264,13 @@ function UsersCard({ overview, authMode }: { overview: Overview; authMode: AuthM
       }
     >
       <div className="grid gap-3">
+        {overview.graphConfigured && (
+          <p className="text-sm text-kumo-subtle">
+            {overview.directory
+              ? `Last imported from Microsoft 365 on ${fullDate(overview.directory.at)}: ${overview.directory.found} mailboxes. The import repeats on a schedule while in standby.`
+              : "The directory has not been imported yet. It is imported on a schedule while in standby."}
+          </p>
+        )}
         {directory.isError && <Notice kind="error">{messageOf(directory.error)}</Notice>}
         {directory.isSuccess && (
           <Notice kind="info">
